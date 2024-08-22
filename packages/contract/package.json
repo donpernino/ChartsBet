@@ -1,0 +1,16 @@
+{
+	"name": "@chartsbet/contract",
+	"version": "1.0.0",
+	"keywords": [],
+	"author": "Thibaut Pernin",
+	"license": "ISC",
+	"private": true,
+	"devDependencies": {
+		"@chainlink/contracts": "1.2.0",
+		"@nomicfoundation/hardhat-ethers": "3.0.7",
+		"@nomicfoundation/hardhat-toolbox": "5.0.0",
+		"@openzeppelin/contracts": "5.0.2",
+		"dotenv": "16.4.5",
+		"hardhat": "2.22.9"
+	}
+}

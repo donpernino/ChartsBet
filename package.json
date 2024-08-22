@@ -1,0 +1,18 @@
+{
+	"name": "chartsbet",
+	"workspaces": [
+		"packages/*"
+	],
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"compile-contracts": "cd packages/contract && npx hardhat compile",
+		"start-api": "cd packages/api && npx ts-node index.ts"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"devDependencies": {},
+	"dependencies": {}
+}
