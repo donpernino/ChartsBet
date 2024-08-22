@@ -71,6 +71,7 @@ const fetchLeaderboard = async (country: Country) => {
 				rank: index + 1,
 				artist: {
 					name: item.track.artists[0].name,
+					image: item.track.album.images[0].url,
 				},
 				track: {
 					name: item.track.name,
