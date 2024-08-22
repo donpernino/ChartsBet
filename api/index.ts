@@ -2,7 +2,9 @@ import express, { Request, Response } from 'express';
 import bodyParser from 'body-parser';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import cors from 'cors';
 import { Country, playlistIds } from './constants/playlists';
+import { countryMap } from './utils/country-map';
 
 dotenv.config();
 
@@ -10,21 +12,18 @@ const { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } = process.env;
 
 const app = express();
 app.use(bodyParser.json());
+app.use(cors());
 
-interface LeaderboardEntry {
+interface Track {
 	rank: number;
-	artist: {
-		name: string;
-		image: string;
-	};
-	track: {
-		name: string;
-		url: string;
-	};
+	artist: string;
+	name: string;
+	url: string;
+	image: string;
 }
 
 type Leaderboards = {
-	[key in Country]?: LeaderboardEntry[];
+	[key in Country]?: Track[];
 };
 
 let leaderboard: Leaderboards = {};
@@ -56,7 +55,7 @@ const fetchLeaderboard = async (country: Country) => {
 		}
 
 		const response = await axios.get(
-			`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`,
+			`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=10`,
 			{
 				headers: {
 					Authorization: `Bearer ${accessToken}`,
@@ -64,25 +63,14 @@ const fetchLeaderboard = async (country: Country) => {
 			}
 		);
 
-		// console.log(response.data.items);
-
 		leaderboard[country] = response.data.items.map(
 			(item: any, index: number) => ({
 				rank: index + 1,
-				artist: {
-					name: item.track.artists[0].name,
-					image: item.track.album.images[0].url,
-				},
-				track: {
-					name: item.track.name,
-					url: item.track.href,
-				},
+				artist: item.track.artists[0].name,
+				name: item.track.name,
+				url: item.track.external_urls.spotify,
+				image: item.track.album.images[0].url,
 			})
-		);
-
-		console.log(
-			`Leaderboard updated for ${country}:`,
-			leaderboard[country]
 		);
 	} catch (error) {
 		console.error(`Error fetching leaderboard for ${country}:`, error);
@@ -112,7 +100,7 @@ app.get('/daily-winner/:country', (req: Request, res: Response) => {
 			.json({ error: `Leaderboard not available for ${country}` });
 	}
 
-	const winner = leaderboard[country]?.[0].artist.name;
+	const winner = leaderboard[country]?.[0].artist;
 	res.json(winner);
 });
 
@@ -126,7 +114,7 @@ app.get('/leaderboard/:country', (req: Request, res: Response) => {
 	}
 
 	res.json({
-		message: `Current leaderboard for ${country}`,
+		message: `Daily Top Songs ${countryMap(country)}`,
 		leaderboard: leaderboard[country],
 	});
 });

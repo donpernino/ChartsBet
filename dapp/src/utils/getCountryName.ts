@@ -17,6 +17,6 @@ export const getCountry = (country: Country) => {
     case "US":
       return "United States";
     case "WW":
-      return "Global";
+      return "Worldwide";
   }
 };
