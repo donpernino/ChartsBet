@@ -9,8 +9,8 @@
 	"description": "",
 	"main": "index.js",
 	"scripts": {
-		"compile-contracts": "cd packages/contract && npx hardhat compile",
-		"start-api": "cd packages/api && npx ts-node index.ts"
+		"compile-contracts": "cd contract && npx hardhat compile",
+		"start-api": "cd api && npx ts-node index.ts"
 	},
 	"keywords": [],
 	"author": "",
