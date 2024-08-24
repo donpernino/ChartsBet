@@ -2,7 +2,6 @@
 pragma solidity 0.8.26;
 
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "@chainlink/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
 import "./Errors.sol";
 
@@ -24,6 +23,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         uint startTime;
         mapping(string => uint) totalBetsOnArtist;
         mapping(string => uint) artistRank; // Rank for each artist in the leaderboard
+        mapping(string => uint) artistOdds; // Odds for each artist in the leaderboard
         Bet[] bets;
     }
 
@@ -61,6 +61,42 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 LINK
     }
 
+    function calculateOdds(
+        string memory artist,
+        uint rank,
+        uint appearances
+    ) internal pure returns (uint) {
+        // Effective rank takes into account multiple appearances of the same artist
+        uint effectiveRank = (rank + (rank + appearances - 1)) / 2;
+        uint odds = 120 + (effectiveRank - 1) * 20;
+        return odds;
+    }
+
+    function assignRanksAndOdds(
+        string memory country,
+        string[] memory topArtists
+    ) internal {
+        Leaderboard storage lb = leaderboards[country];
+        mapping(string => uint) storage artistAppearances = lb.artistRank;
+
+        // Count appearances
+        for (uint i = 0; i < topArtists.length; i++) {
+            artistAppearances[topArtists[i]]++;
+        }
+
+        for (uint i = 0; i < topArtists.length; i++) {
+            if (lb.artistRank[topArtists[i]] == 0) {
+                // If rank not assigned yet
+                lb.artistRank[topArtists[i]] = i + 1;
+                lb.artistOdds[topArtists[i]] = calculateOdds(
+                    topArtists[i],
+                    i + 1,
+                    artistAppearances[topArtists[i]]
+                );
+            }
+        }
+    }
+
     function createLeaderboard(string memory country) public onlyOwner {
         require(isValidCountry(country), "Invalid country code");
 
@@ -76,7 +112,6 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
 
         // Adding the country parameter to the Chainlink request
         req.add("country", country);
-        req.add("compact", "true");
 
         // Send the Chainlink request to the oracle
         sendChainlinkRequestTo(oracle, req, fee);
@@ -95,10 +130,8 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         newLeaderboard.startTime = block.timestamp;
         countryList.push(country);
 
-        // Set rank for actual top 10 artists
-        for (uint i = 0; i < topArtists.length; i++) {
-            newLeaderboard.artistRank[topArtists[i]] = i + 1;
-        }
+        // Set rank and odds for actual top 10 artists
+        assignRanksAndOdds(country, topArtists);
     }
 
     function placeBet(
@@ -120,13 +153,9 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         }
 
         Leaderboard storage lb = leaderboards[country];
-        uint rank = lb.artistRank[artist];
-        uint odds;
+        uint odds = lb.artistOdds[artist];
 
-        if (rank > 0 && rank <= 10) {
-            // Odds calculation based on rank
-            odds = 120 + (rank - 1) * 20;
-        } else {
+        if (odds == 0) {
             odds = 200; // Default odds for artists not in top 10 (2.0x)
         }
 
