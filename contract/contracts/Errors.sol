@@ -7,3 +7,4 @@ error BettingClosed(string genre);
 error BettingPeriodEnded(string genre);
 error BetAmountZero();
 error BettingPeriodNotEndedYet(string genre);
+error CountryAlreadyExists();

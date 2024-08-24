@@ -100,7 +100,7 @@ app.get('/daily-winner/:country', (req: Request, res: Response) => {
 			.json({ error: `Leaderboard not available for ${country}` });
 	}
 
-	const winner = leaderboard[country]?.[0].artist;
+	const winner = leaderboard[country]?.[0].artist.toLowerCase();
 	res.json(winner);
 });
 

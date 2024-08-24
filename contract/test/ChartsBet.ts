@@ -21,6 +21,11 @@ describe('ChartsBet', function () {
 		return { chartsBet, oracle, jobId, fee, owner, otherAccount };
 	}
 
+	// Mocking the Chainlink Oracle fulfillment
+	async function fulfillOracleRequest(chartsBet, requestId, topArtists) {
+		await chartsBet.fulfillLeaderboard(requestId, topArtists);
+	}
+
 	describe('Deployment', function () {
 		it('Should set the correct oracle, jobId, and fee', async function () {
 			const { chartsBet, oracle, jobId, fee } = await loadFixture(
@@ -41,52 +46,91 @@ describe('ChartsBet', function () {
 		});
 	});
 
-	describe('Creating Genres', function () {
-		it('Should allow the owner to create a new genre', async function () {
-			const { chartsBet, owner } = await loadFixture(
-				deployChartsBetFixture
+	describe('Creating Leaderboards', function () {
+		it('Should allow the owner to create a new leaderboard and assign ranks and odds', async function () {
+			const { chartsBet } = await loadFixture(deployChartsBetFixture);
+
+			// Mocking Chainlink Oracle fulfillment
+			const topArtists = [
+				'GIMS',
+				'GIMS',
+				'Carbonne',
+				'Leto',
+				'Lacrim',
+				'Dadi',
+				'FloyyMenor',
+				'Ninho',
+				'Gambi',
+				'THEODORT',
+			];
+			const requestId = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('requestId1')
 			);
+			await fulfillOracleRequest(chartsBet, requestId, topArtists);
 
-			await chartsBet.createGenre('Pop', 86400); // 1 day duration
-
-			const genre = await chartsBet.genres('Pop');
-			expect(genre.name).to.equal('Pop');
-			expect(genre.duration).to.equal(86400);
+			const leaderboard = await chartsBet.leaderboards('FR');
+			expect(leaderboard.country).to.equal('FR');
+			expect(
+				leaderboard.artistRank[
+					hre.ethers.keccak256(hre.ethers.toUtf8Bytes('GIMS'))
+				]
+			).to.equal(1); // Effective rank
+			expect(
+				leaderboard.artistOdds[
+					hre.ethers.keccak256(hre.ethers.toUtf8Bytes('GIMS'))
+				]
+			).to.be.closeTo(130, 5); // Odds based on effective rank
 		});
 
-		it('Should revert if genre name is empty', async function () {
+		it('Should revert if leaderboard already exists', async function () {
 			const { chartsBet } = await loadFixture(deployChartsBetFixture);
 
+			await chartsBet.createLeaderboard('FR');
 			await expect(
-				chartsBet.createGenre('', 86400)
-			).to.be.revertedWithCustomError(chartsBet, 'GenreNameEmpty');
-		});
-
-		it('Should revert if genre already exists', async function () {
-			const { chartsBet } = await loadFixture(deployChartsBetFixture);
-
-			await chartsBet.createGenre('Pop', 86400);
-
-			await expect(
-				chartsBet.createGenre('Pop', 86400)
-			).to.be.revertedWithCustomError(chartsBet, 'GenreAlreadyExists');
+				chartsBet.createLeaderboard('FR')
+			).to.be.revertedWithCustomError(chartsBet, 'CountryAlreadyExists');
 		});
 	});
 
 	describe('Placing Bets', function () {
-		it('Should allow users to place a bet', async function () {
+		it('Should allow users to place a bet with correct odds calculation (case-insensitive)', async function () {
 			const { chartsBet, otherAccount } = await loadFixture(
 				deployChartsBetFixture
 			);
 
-			await chartsBet.createGenre('Pop', 86400);
+			// Mocking Chainlink Oracle fulfillment
+			const topArtists = [
+				'GIMS',
+				'GIMS',
+				'Carbonne',
+				'Leto',
+				'Lacrim',
+				'Dadi',
+				'FloyyMenor',
+				'Ninho',
+				'Gambi',
+				'THEODORT',
+			];
+			const requestId = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('requestId1')
+			);
+			await fulfillOracleRequest(chartsBet, requestId, topArtists);
 
-			await chartsBet.connect(otherAccount).placeBet('Pop', 'Artist A', {
+			await chartsBet.connect(otherAccount).placeBet('FR', 'gims', {
 				value: hre.ethers.parseEther('1'),
 			});
 
-			const genre = await chartsBet.genres('Pop');
-			expect(genre.totalBetAmount).to.equal(hre.ethers.parseEther('1'));
+			const leaderboard = await chartsBet.leaderboards('FR');
+			const artistHash = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('gims')
+			);
+
+			expect(leaderboard.totalBetAmount).to.equal(
+				hre.ethers.parseEther('1')
+			);
+			expect(leaderboard.totalBetsOnArtist[artistHash]).to.equal(
+				hre.ethers.parseEther('1')
+			);
 		});
 
 		it('Should revert if bet amount is zero', async function () {
@@ -94,43 +138,84 @@ describe('ChartsBet', function () {
 				deployChartsBetFixture
 			);
 
-			await chartsBet.createGenre('Pop', 86400);
+			// Mocking Chainlink Oracle fulfillment
+			const topArtists = [
+				'GIMS',
+				'GIMS',
+				'Carbonne',
+				'Leto',
+				'Lacrim',
+				'Dadi',
+				'FloyyMenor',
+				'Ninho',
+				'Gambi',
+				'THEODORT',
+			];
+			const requestId = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('requestId1')
+			);
+			await fulfillOracleRequest(chartsBet, requestId, topArtists);
 
 			await expect(
 				chartsBet
 					.connect(otherAccount)
-					.placeBet('Pop', 'Artist A', { value: 0 })
+					.placeBet('FR', 'gims', { value: 0 })
 			).to.be.revertedWithCustomError(chartsBet, 'BetAmountZero');
 		});
 
-		it('Should revert if betting is closed for the genre', async function () {
+		it('Should revert if betting is closed for the country', async function () {
 			const { chartsBet, otherAccount } = await loadFixture(
 				deployChartsBetFixture
 			);
 
-			await chartsBet.createGenre('Pop', 86400);
-			await time.increase(86401); // Increase time to simulate betting period ended
+			await chartsBet.createLeaderboard('FR');
+			await chartsBet.requestWinningArtist('FR'); // Manually close betting
 
 			await expect(
-				chartsBet.connect(otherAccount).placeBet('Pop', 'Artist A', {
-					value: hre.ethers.parseEther('1'),
-				})
-			).to.be.revertedWithCustomError(chartsBet, 'BettingPeriodEnded');
-		});
-
-		it('Should revert if betting is closed manually', async function () {
-			const { chartsBet, otherAccount } = await loadFixture(
-				deployChartsBetFixture
-			);
-
-			await chartsBet.createGenre('Pop', 86400);
-			await chartsBet.requestWinningArtist('Pop'); // Manually close betting
-
-			await expect(
-				chartsBet.connect(otherAccount).placeBet('Pop', 'Artist A', {
+				chartsBet.connect(otherAccount).placeBet('FR', 'gims', {
 					value: hre.ethers.parseEther('1'),
 				})
 			).to.be.revertedWithCustomError(chartsBet, 'BettingClosed');
+		});
+
+		it('Should handle case-insensitive artist names correctly', async function () {
+			const { chartsBet, otherAccount } = await loadFixture(
+				deployChartsBetFixture
+			);
+
+			// Mocking Chainlink Oracle fulfillment
+			const topArtists = [
+				'GIMS',
+				'gims',
+				'Carbonne',
+				'Leto',
+				'Lacrim',
+				'Dadi',
+				'FloyyMenor',
+				'Ninho',
+				'Gambi',
+				'THEODORT',
+			];
+			const requestId = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('requestId1')
+			);
+			await fulfillOracleRequest(chartsBet, requestId, topArtists);
+
+			await chartsBet.connect(otherAccount).placeBet('FR', 'GIMS', {
+				value: hre.ethers.parseEther('1'),
+			});
+
+			const leaderboard = await chartsBet.leaderboards('FR');
+			const artistHash = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('gims')
+			);
+
+			expect(leaderboard.totalBetAmount).to.equal(
+				hre.ethers.parseEther('1')
+			);
+			expect(leaderboard.totalBetsOnArtist[artistHash]).to.equal(
+				hre.ethers.parseEther('1')
+			);
 		});
 	});
 
@@ -138,20 +223,20 @@ describe('ChartsBet', function () {
 		it('Should allow the owner to request the winning artist after the betting period', async function () {
 			const { chartsBet } = await loadFixture(deployChartsBetFixture);
 
-			await chartsBet.createGenre('Pop', 86400);
-			await time.increase(86401); // Increase time to simulate betting period ended
+			await chartsBet.createLeaderboard('FR');
+			await time.increase(7 * 24 * 60 * 60 + 1); // Increase time to simulate betting period ended
 
-			await expect(chartsBet.requestWinningArtist('Pop')).not.to.be
+			await expect(chartsBet.requestWinningArtist('FR')).not.to.be
 				.reverted;
 		});
 
 		it('Should revert if requested before the betting period ends', async function () {
 			const { chartsBet } = await loadFixture(deployChartsBetFixture);
 
-			await chartsBet.createGenre('Pop', 86400);
+			await chartsBet.createLeaderboard('FR');
 
 			await expect(
-				chartsBet.requestWinningArtist('Pop')
+				chartsBet.requestWinningArtist('FR')
 			).to.be.revertedWithCustomError(
 				chartsBet,
 				'BettingPeriodNotEndedYet'
@@ -161,10 +246,10 @@ describe('ChartsBet', function () {
 		it('Should emit an event when the winning artist is requested', async function () {
 			const { chartsBet } = await loadFixture(deployChartsBetFixture);
 
-			await chartsBet.createGenre('Pop', 86400);
-			await time.increase(86401); // Increase time to simulate betting period ended
+			await chartsBet.createLeaderboard('FR');
+			await time.increase(7 * 24 * 60 * 60 + 1); // Increase time to simulate betting period ended
 
-			await expect(chartsBet.requestWinningArtist('Pop'))
+			await expect(chartsBet.requestWinningArtist('FR'))
 				.to.emit(chartsBet, 'RequestWinningArtist')
 				.withArgs(anyValue, anyValue); // We accept any value for requestId and winningArtist
 		});
@@ -176,8 +261,25 @@ describe('ChartsBet', function () {
 				deployChartsBetFixture
 			);
 
-			await chartsBet.createGenre('Pop', 86400);
-			await chartsBet.connect(otherAccount).placeBet('Pop', 'Artist A', {
+			// Mocking Chainlink Oracle fulfillment
+			const topArtists = [
+				'GIMS',
+				'GIMS',
+				'Carbonne',
+				'Leto',
+				'Lacrim',
+				'Dadi',
+				'FloyyMenor',
+				'Ninho',
+				'Gambi',
+				'THEODORT',
+			];
+			const requestId = hre.ethers.keccak256(
+				hre.ethers.toUtf8Bytes('requestId1')
+			);
+			await fulfillOracleRequest(chartsBet, requestId, topArtists);
+
+			await chartsBet.connect(otherAccount).placeBet('FR', 'GIMS', {
 				value: hre.ethers.parseEther('1'),
 			});
 

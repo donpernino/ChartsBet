@@ -21,9 +21,9 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         bool isClosed;
         uint totalBetAmount;
         uint startTime;
-        mapping(string => uint) totalBetsOnArtist;
-        mapping(string => uint) artistRank; // Rank for each artist in the leaderboard
-        mapping(string => uint) artistOdds; // Odds for each artist in the leaderboard
+        mapping(bytes32 => uint) totalBetsOnArtist;
+        mapping(bytes32 => uint) artistRank; // Rank for each artist in the leaderboard
+        mapping(bytes32 => uint) artistOdds; // Odds for each artist in the leaderboard
         Bet[] bets;
     }
 
@@ -55,14 +55,20 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
     event LeaderboardCreated(bytes32 indexed requestId, string country);
 
     constructor() ConfirmedOwner(msg.sender) {
-        setPublicChainlinkToken();
+        _setPublicChainlinkToken();
         oracle = 0x7AFe1118Ea78C1eae84ca8feE5C68b64E7aC08dF; // Replace with your oracle address
         jobId = "d5270d1c311941d0b08bead21fea7747"; // Replace with your job ID
         fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 LINK
     }
 
+    function normalizeArtistName(
+        string memory artist
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(artist));
+    }
+
     function calculateOdds(
-        string memory artist,
+        bytes32 artistHash,
         uint rank,
         uint appearances
     ) internal pure returns (uint) {
@@ -77,21 +83,23 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         string[] memory topArtists
     ) internal {
         Leaderboard storage lb = leaderboards[country];
-        mapping(string => uint) storage artistAppearances = lb.artistRank;
+        mapping(bytes32 => uint) storage artistAppearances = lb.artistRank;
 
         // Count appearances
         for (uint i = 0; i < topArtists.length; i++) {
-            artistAppearances[topArtists[i]]++;
+            bytes32 artistHash = normalizeArtistName(topArtists[i]);
+            artistAppearances[artistHash]++;
         }
 
         for (uint i = 0; i < topArtists.length; i++) {
-            if (lb.artistRank[topArtists[i]] == 0) {
+            bytes32 artistHash = normalizeArtistName(topArtists[i]);
+            if (lb.artistRank[artistHash] == 0) {
                 // If rank not assigned yet
-                lb.artistRank[topArtists[i]] = i + 1;
-                lb.artistOdds[topArtists[i]] = calculateOdds(
-                    topArtists[i],
+                lb.artistRank[artistHash] = i + 1;
+                lb.artistOdds[artistHash] = calculateOdds(
+                    artistHash,
                     i + 1,
-                    artistAppearances[topArtists[i]]
+                    artistAppearances[artistHash]
                 );
             }
         }
@@ -104,7 +112,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
             revert CountryAlreadyExists();
         }
 
-        Chainlink.Request memory req = buildChainlinkRequest(
+        Chainlink.Request memory req = _buildChainlinkRequest(
             jobId,
             address(this),
             this.fulfillLeaderboard.selector
@@ -114,7 +122,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         req.add("country", country);
 
         // Send the Chainlink request to the oracle
-        sendChainlinkRequestTo(oracle, req, fee);
+        _sendChainlinkRequestTo(oracle, req, fee);
 
         emit LeaderboardCreated(req.id, country);
     }
@@ -153,7 +161,8 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         }
 
         Leaderboard storage lb = leaderboards[country];
-        uint odds = lb.artistOdds[artist];
+        bytes32 artistHash = normalizeArtistName(artist);
+        uint odds = lb.artistOdds[artistHash];
 
         if (odds == 0) {
             odds = 200; // Default odds for artists not in top 10 (2.0x)
@@ -161,7 +170,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
 
         lb.bets.push(Bet(msg.sender, msg.value, artist, odds));
         lb.totalBetAmount += msg.value;
-        lb.totalBetsOnArtist[artist] += msg.value;
+        lb.totalBetsOnArtist[artistHash] += msg.value;
     }
 
     function requestWinningArtist(string memory country) public onlyOwner {
@@ -174,7 +183,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
             revert BettingPeriodNotEndedYet(country);
         }
 
-        Chainlink.Request memory req = buildChainlinkRequest(
+        Chainlink.Request memory req = _buildChainlinkRequest(
             jobId,
             address(this),
             this.fulfill.selector
@@ -184,7 +193,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         req.add("country", country);
 
         // Send the Chainlink request to the oracle
-        sendChainlinkRequestTo(oracle, req, fee);
+        _sendChainlinkRequestTo(oracle, req, fee);
 
         // Mark the leaderboard as closed to prevent further bets
         leaderboards[country].isClosed = true;
@@ -194,6 +203,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         bytes32 _requestId,
         string memory _winningArtist
     ) public recordChainlinkFulfillment(_requestId) {
+        bytes32 artistHash = normalizeArtistName(_winningArtist);
         emit RequestWinningArtist(
             _requestId,
             leaderboards[countryList[0]].country,
@@ -208,10 +218,7 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
 
                 for (uint j = 0; j < lb.bets.length; j++) {
                     Bet storage bet = lb.bets[j];
-                    if (
-                        keccak256(abi.encodePacked(bet.artist)) ==
-                        keccak256(abi.encodePacked(_winningArtist))
-                    ) {
+                    if (normalizeArtistName(bet.artist) == artistHash) {
                         uint winnings = (bet.amount * bet.odds) / 100;
                         payable(bet.user).transfer(winnings);
                     }
@@ -228,7 +235,10 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         string memory country,
         string memory artist
     ) public view returns (uint) {
-        return leaderboards[country].totalBetsOnArtist[artist];
+        return
+            leaderboards[country].totalBetsOnArtist[
+                normalizeArtistName(artist)
+            ];
     }
 
     function getTotalBetAmount(
