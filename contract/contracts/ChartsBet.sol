@@ -13,27 +13,46 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         address user;
         uint amount;
         string artist;
+        uint odds; // Odds associated with the bet
     }
 
-    struct Genre {
-        string name;
+    struct Leaderboard {
+        string country;
         string winningArtist;
         bool isClosed;
         uint totalBetAmount;
         uint startTime;
-        uint duration;
         mapping(string => uint) totalBetsOnArtist;
+        mapping(string => uint) artistRank; // Rank for each artist in the leaderboard
         Bet[] bets;
     }
 
-    mapping(string => Genre) public genres;
-    string[] public genreList;
+    mapping(string => Leaderboard) public leaderboards;
+    string[] public countryList;
 
     address private oracle;
     bytes32 private jobId;
     uint256 private fee;
 
-    event RequestWinningArtist(bytes32 indexed requestId, string winningArtist);
+    uint private constant WEEK_DURATION = 7 days;
+    string[8] private validCountries = [
+        "WW",
+        "BR",
+        "DE",
+        "ES",
+        "FR",
+        "IT",
+        "PT",
+        "US"
+    ];
+
+    event RequestWinningArtist(
+        bytes32 indexed requestId,
+        string country,
+        string winningArtist
+    );
+
+    event LeaderboardCreated(bytes32 indexed requestId, string country);
 
     constructor() ConfirmedOwner(msg.sender) {
         setPublicChainlinkToken();
@@ -42,52 +61,88 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
         fee = (1 * LINK_DIVISIBILITY) / 10; // 0.1 LINK
     }
 
-    function createGenre(string memory genre, uint duration) public onlyOwner {
-        if (bytes(genre).length == 0) {
-            revert GenreNameEmpty();
-        }
-        if (bytes(genres[genre].name).length != 0) {
-            revert GenreAlreadyExists();
+    function createLeaderboard(string memory country) public onlyOwner {
+        require(isValidCountry(country), "Invalid country code");
+
+        if (bytes(leaderboards[country].country).length != 0) {
+            revert CountryAlreadyExists();
         }
 
-        Genre storage newGenre = genres[genre];
-        newGenre.name = genre;
-        newGenre.isClosed = false;
-        newGenre.startTime = block.timestamp;
-        newGenre.duration = duration;
-        genreList.push(genre);
+        Chainlink.Request memory req = buildChainlinkRequest(
+            jobId,
+            address(this),
+            this.fulfillLeaderboard.selector
+        );
+
+        // Adding the country parameter to the Chainlink request
+        req.add("country", country);
+        req.add("compact", "true");
+
+        // Send the Chainlink request to the oracle
+        sendChainlinkRequestTo(oracle, req, fee);
+
+        emit LeaderboardCreated(req.id, country);
+    }
+
+    function fulfillLeaderboard(
+        bytes32 _requestId,
+        string[] memory topArtists
+    ) public recordChainlinkFulfillment(_requestId) {
+        string memory country = ""; // Extract country from the requestId or pass it in the Chainlink request
+        Leaderboard storage newLeaderboard = leaderboards[country];
+        newLeaderboard.country = country;
+        newLeaderboard.isClosed = false;
+        newLeaderboard.startTime = block.timestamp;
+        countryList.push(country);
+
+        // Set rank for actual top 10 artists
+        for (uint i = 0; i < topArtists.length; i++) {
+            newLeaderboard.artistRank[topArtists[i]] = i + 1;
+        }
     }
 
     function placeBet(
-        string memory genre,
+        string memory country,
         string memory artist
     ) public payable {
+        require(isValidCountry(country), "Invalid country code");
+
         if (msg.value == 0) {
             revert BetAmountZero();
         }
-        if (genres[genre].isClosed) {
-            revert BettingClosed(genre);
+        if (leaderboards[country].isClosed) {
+            revert BettingClosed(country);
         }
         if (
-            block.timestamp >= genres[genre].startTime + genres[genre].duration
+            block.timestamp >= leaderboards[country].startTime + WEEK_DURATION
         ) {
-            revert BettingPeriodEnded(genre);
+            revert BettingPeriodEnded(country);
         }
 
-        Genre storage g = genres[genre];
-        g.bets.push(Bet(msg.sender, msg.value, artist));
-        g.totalBetAmount += msg.value;
-        g.totalBetsOnArtist[artist] += msg.value;
+        Leaderboard storage lb = leaderboards[country];
+        uint rank = lb.artistRank[artist];
+        uint odds;
+
+        if (rank > 0 && rank <= 10) {
+            // Odds calculation based on rank
+            odds = 120 + (rank - 1) * 20;
+        } else {
+            odds = 200; // Default odds for artists not in top 10 (2.0x)
+        }
+
+        lb.bets.push(Bet(msg.sender, msg.value, artist, odds));
+        lb.totalBetAmount += msg.value;
+        lb.totalBetsOnArtist[artist] += msg.value;
     }
 
-    function requestWinningArtist(string memory genre) public onlyOwner {
-        if (genres[genre].isClosed) {
-            revert BettingClosed(genre);
+    function requestWinningArtist(string memory country) public onlyOwner {
+        require(isValidCountry(country), "Invalid country code");
+
+        if (leaderboards[country].isClosed) {
+            revert BettingClosed(country);
         }
-        if (
-            block.timestamp < genres[genre].startTime + genres[genre].duration
-        ) {
-            revert BettingPeriodNotEndedYet(genre);
+        if (block.timestamp < leaderboards[country].startTime + WEEK_DURATION) {
+            revert BettingPeriodNotEndedYet(country);
         }
 
         Chainlink.Request memory req = buildChainlinkRequest(
@@ -95,37 +150,40 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
             address(this),
             this.fulfill.selector
         );
-        req.add("genre", genre);
-        req.add("metric", "most_streamed"); // Metric you want to query, adjust based on your needs
+
+        // Adding the country parameter to the Chainlink request
+        req.add("country", country);
+
+        // Send the Chainlink request to the oracle
         sendChainlinkRequestTo(oracle, req, fee);
 
-        genres[genre].isClosed = true;
+        // Mark the leaderboard as closed to prevent further bets
+        leaderboards[country].isClosed = true;
     }
 
     function fulfill(
         bytes32 _requestId,
         string memory _winningArtist
     ) public recordChainlinkFulfillment(_requestId) {
-        emit RequestWinningArtist(_requestId, _winningArtist);
+        emit RequestWinningArtist(
+            _requestId,
+            leaderboards[countryList[0]].country,
+            _winningArtist
+        );
 
-        for (uint i = 0; i < genreList.length; i++) {
-            Genre storage g = genres[genreList[i]];
-            if (
-                !g.isClosed &&
-                keccak256(abi.encodePacked(g.name)) ==
-                keccak256(abi.encodePacked(_winningArtist))
-            ) {
-                g.winningArtist = _winningArtist;
-                g.isClosed = true;
+        for (uint i = 0; i < countryList.length; i++) {
+            Leaderboard storage lb = leaderboards[countryList[i]];
+            if (!lb.isClosed) {
+                lb.winningArtist = _winningArtist;
+                lb.isClosed = true;
 
-                for (uint j = 0; j < g.bets.length; j++) {
-                    Bet storage bet = g.bets[j];
+                for (uint j = 0; j < lb.bets.length; j++) {
+                    Bet storage bet = lb.bets[j];
                     if (
                         keccak256(abi.encodePacked(bet.artist)) ==
                         keccak256(abi.encodePacked(_winningArtist))
                     ) {
-                        uint winnings = (bet.amount * g.totalBetAmount) /
-                            g.totalBetsOnArtist[_winningArtist];
+                        uint winnings = (bet.amount * bet.odds) / 100;
                         payable(bet.user).transfer(winnings);
                     }
                 }
@@ -138,24 +196,40 @@ contract ChartsBet is ChainlinkClient, ConfirmedOwner {
     }
 
     function getTotalBetsOnArtist(
-        string memory genre,
+        string memory country,
         string memory artist
     ) public view returns (uint) {
-        return genres[genre].totalBetsOnArtist[artist];
+        return leaderboards[country].totalBetsOnArtist[artist];
     }
 
-    function getTotalBetAmount(string memory genre) public view returns (uint) {
-        return genres[genre].totalBetAmount;
+    function getTotalBetAmount(
+        string memory country
+    ) public view returns (uint) {
+        return leaderboards[country].totalBetAmount;
     }
 
-    function getBetsInGenre(
-        string memory genre
+    function getBetsInCountry(
+        string memory country
     ) public view returns (Bet[] memory) {
-        Genre storage g = genres[genre];
-        Bet[] memory bets = new Bet[](g.bets.length);
-        for (uint i = 0; i < g.bets.length; i++) {
-            bets[i] = g.bets[i];
+        Leaderboard storage lb = leaderboards[country];
+        Bet[] memory bets = new Bet[](lb.bets.length);
+        for (uint i = 0; i < lb.bets.length; i++) {
+            bets[i] = lb.bets[i];
         }
         return bets;
+    }
+
+    function isValidCountry(
+        string memory country
+    ) internal view returns (bool) {
+        for (uint i = 0; i < validCountries.length; i++) {
+            if (
+                keccak256(abi.encodePacked(validCountries[i])) ==
+                keccak256(abi.encodePacked(country))
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 }

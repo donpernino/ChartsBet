@@ -113,10 +113,19 @@ app.get('/leaderboard/:country', (req: Request, res: Response) => {
 			.json({ error: `Leaderboard not available for ${country}` });
 	}
 
-	res.json({
-		message: `Daily Top Songs ${countryMap(country)}`,
-		leaderboard: leaderboard[country],
-	});
+	const compact = req.query.compact === 'true';
+
+	if (compact) {
+		const compactLeaderboard = leaderboard[country]?.map(
+			(track) => track.artist
+		);
+		res.json(compactLeaderboard);
+	} else {
+		res.json({
+			message: `Daily Top Songs ${countryMap(country)}`,
+			leaderboard: leaderboard[country],
+		});
+	}
 });
 
 setInterval(() => {
