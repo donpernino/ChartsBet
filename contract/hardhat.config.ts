@@ -1,6 +1,5 @@
 import { HardhatUserConfig } from 'hardhat/config';
 import '@nomicfoundation/hardhat-toolbox';
-import '@chainlink/hardhat-chainlink';
 import 'dotenv/config';
 import 'hardhat-gas-reporter';
 

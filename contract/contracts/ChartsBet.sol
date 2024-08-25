@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity 0.8.26;
 
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+
+import "./ChartsOracle.sol";
 import "./Errors.sol";
 
-contract ChartsBet {
+contract ChartsBet is
+    Initializable,
+    OwnableUpgradeable,
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable
+{
     struct Bet {
         address user;
         uint amount;
@@ -26,8 +37,7 @@ contract ChartsBet {
     mapping(string => Leaderboard) public leaderboards;
     string[] public countryList;
 
-    address public owner;
-    address public oracleAddress; // Address of the Oracle contract
+    ChartsOracle public oracle; // Direct reference to the Oracle contract
     uint private constant WEEK_DURATION = 7 days;
     string[8] private validCountries = [
         "WW",
@@ -48,47 +58,20 @@ contract ChartsBet {
         uint amount
     );
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) {
-            revert Unauthorized();
-        }
-        _;
+    function initialize() public initializer {
+        __Ownable_init(msg.sender);
+        __Pausable_init();
+        __ReentrancyGuard_init();
+
+        oracle = new ChartsOracle();
     }
 
-    modifier onlyOracle() {
-        if (msg.sender != oracleAddress) {
-            revert Unauthorized();
-        }
-        _;
-    }
-
-    /**
-     * @notice Contract constructor, sets the deployer as the owner.
-     */
-    constructor(address _oracleAddress) {
-        owner = msg.sender;
-        oracleAddress = _oracleAddress;
-    }
-
-    /**
-     * @notice Normalizes the artist name by hashing it using keccak256.
-     * @dev This is used to standardize artist names for comparison.
-     * @param artist The artist's name as a string.
-     * @return The hashed artist name as bytes32.
-     */
     function normalizeArtistName(
         string memory artist
     ) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(artist));
     }
 
-    /**
-     * @notice Calculates the betting odds based on the artist's rank and the number of appearances.
-     * @dev The formula used accounts for the rank and appearance to adjust the odds dynamically.
-     * @param rank The current rank of the artist.
-     * @param appearances The number of times the artist has appeared in the leaderboard.
-     * @return odds The calculated odds for the artist.
-     */
     function calculateOdds(
         uint rank,
         uint appearances
@@ -97,12 +80,6 @@ contract ChartsBet {
         odds = 120 + (effectiveRank - 1) * 20;
     }
 
-    /**
-     * @notice Assigns ranks and calculates odds for artists in a leaderboard.
-     * @dev This function updates the ranks and odds of artists in the leaderboard.
-     * @param country The country for which the leaderboard is being updated.
-     * @param topArtists An array of artist names representing the top artists.
-     */
     function assignRanksAndOdds(
         string memory country,
         string[] memory topArtists
@@ -127,12 +104,9 @@ contract ChartsBet {
         }
     }
 
-    /**
-     * @notice Creates a new leaderboard for a given country.
-     * @dev Only the owner can create a leaderboard, and it must not already exist.
-     * @param country The country code for which the leaderboard is created.
-     */
-    function createLeaderboard(string memory country) public onlyOwner {
+    function createLeaderboard(
+        string memory country
+    ) public onlyOwner whenNotPaused {
         if (!isValidCountry(country)) {
             revert InvalidCountryCode();
         }
@@ -141,20 +115,13 @@ contract ChartsBet {
             revert CountryAlreadyExists();
         }
 
-        // Emit an event that the Oracle contract listens to
         emit LeaderboardCreated(country);
     }
 
-    /**
-     * @notice Fulfills the leaderboard data after the artists' rankings are known.
-     * @dev This function is called by the Oracle contract to finalize the leaderboard.
-     * @param country The country code for which the leaderboard is fulfilled.
-     * @param topArtists An array of the top artist names.
-     */
     function fulfillTopArtists(
         string memory country,
         string[] memory topArtists
-    ) public onlyOracle {
+    ) public onlyOwner whenNotPaused {
         if (!isValidCountry(country)) {
             revert InvalidCountryCode();
         }
@@ -168,16 +135,10 @@ contract ChartsBet {
         assignRanksAndOdds(country, topArtists);
     }
 
-    /**
-     * @notice Fulfills the winning artist and distributes winnings to the bettors.
-     * @dev The Oracle contract fulfills the request and transfers the winnings to the respective bettors.
-     * @param country The country code for which the winning artist is fulfilled.
-     * @param winningArtist The winning artist's name.
-     */
     function fulfillDailyWinner(
         string memory country,
         string memory winningArtist
-    ) public onlyOracle {
+    ) public onlyOwner whenNotPaused {
         Leaderboard storage lb = leaderboards[country];
         if (lb.isClosed) {
             revert BettingClosed();
@@ -198,20 +159,10 @@ contract ChartsBet {
         }
     }
 
-    /**
-     * @notice Allows the owner to withdraw the contract's balance in case of an emergency.
-     * @dev This function should be used cautiously and only in genuine emergency scenarios.
-     */
-    function emergencyWithdraw() public onlyOwner {
-        payable(owner).transfer(address(this).balance);
+    function emergencyWithdraw() public onlyOwner nonReentrant {
+        payable(owner()).transfer(address(this).balance);
     }
 
-    /**
-     * @notice Retrieves the total bets placed on a specific artist in a given country.
-     * @param country The country code.
-     * @param artist The artist's name.
-     * @return The total amount of bets placed on the artist.
-     */
     function getTotalBetsOnArtist(
         string memory country,
         string memory artist
@@ -222,22 +173,12 @@ contract ChartsBet {
             ];
     }
 
-    /**
-     * @notice Retrieves the total amount of bets placed in a specific country.
-     * @param country The country code.
-     * @return The total bet amount.
-     */
     function getTotalBetAmount(
         string memory country
     ) public view returns (uint) {
         return leaderboards[country].totalBetAmount;
     }
 
-    /**
-     * @notice Retrieves all the bets placed in a specific country.
-     * @param country The country code.
-     * @return An array of Bet structs representing all the bets placed.
-     */
     function getBetsInCountry(
         string memory country
     ) public view returns (Bet[] memory) {
@@ -249,11 +190,6 @@ contract ChartsBet {
         return bets;
     }
 
-    /**
-     * @notice Validates whether a given country code is in the list of valid countries.
-     * @param country The country code to validate.
-     * @return True if the country code is valid, false otherwise.
-     */
     function isValidCountry(
         string memory country
     ) internal view returns (bool) {
@@ -267,4 +203,15 @@ contract ChartsBet {
         }
         return false;
     }
+
+    function pause() public onlyOwner {
+        _pause();
+    }
+
+    function unpause() public onlyOwner {
+        _unpause();
+    }
+
+    // Add a gap for future variable additions without affecting storage layout
+    uint256[50] private __gap;
 }
