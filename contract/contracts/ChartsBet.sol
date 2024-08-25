@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
+import './Errors.sol';
 
-contract ChartsBet is ChainlinkClient {
-    using Chainlink for Chainlink.Request;
-
+contract ChartsBet {
     struct Bet {
         address user;
         uint amount;
@@ -41,60 +39,23 @@ contract ChartsBet is ChainlinkClient {
         "US"
     ];
 
-    bytes32 private jobId;
-    uint256 private fee;
-
-    // Mapping from requestId to country code
-    mapping(bytes32 => string) private requestIdToCountry;
-
-    /// @dev Error for invalid country code.
-    error InvalidCountryCode(string country);
-
-    /// @dev Error when attempting to bet after betting period has ended.
-    error BettingPeriodEnded();
-
-    /// @dev Error when betting with zero value.
-    error BetAmountZero();
-
-    /// @dev Error when betting on a closed leaderboard.
-    error BettingClosed();
-
-    /// @dev Error when attempting to perform an action before the betting period ends.
-    error BettingPeriodNotEndedYet();
-
-    /// @dev Error when attempting to create a leaderboard that already exists.
-    error CountryAlreadyExists();
-
-    event DataRequested(bytes32 indexed requestId, string country);
-    event DataFulfilled(
-        bytes32 indexed requestId,
-        string country,
-        string[] topArtists
-    );
-    event LeaderboardCreated(bytes32 indexed requestId, string country);
-    event RequestWinningArtist(
-        bytes32 indexed requestId,
-        string country,
-        string winningArtist
-    );
-    event BetPlaced(
-        address indexed user,
-        string country,
-        string artist,
-        uint amount
-    );
+    event LeaderboardCreated(string country);
+    event DataFulfilled(string country, string[] topArtists);
+    event RequestWinningArtist(string country, string winningArtist);
+    event BetPlaced(address indexed user, string country, string artist, uint amount);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only the owner can perform this action");
+        if (msg.sender != owner) {
+            revert Unauthorized();
+        }
         _;
     }
 
-    constructor(address _oracle, bytes32 _jobId, uint256 _fee) {
+    /**
+     * @notice Contract constructor, sets the deployer as the owner.
+     */
+    constructor() {
         owner = msg.sender;
-        setPublicChainlinkToken();
-        jobId = _jobId;
-        fee = _fee;
-        setChainlinkOracle(_oracle);
     }
 
     /**
@@ -103,9 +64,7 @@ contract ChartsBet is ChainlinkClient {
      * @param artist The artist's name as a string.
      * @return The hashed artist name as bytes32.
      */
-    function normalizeArtistName(
-        string memory artist
-    ) internal pure returns (bytes32) {
+    function normalizeArtistName(string memory artist) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(artist));
     }
 
@@ -116,10 +75,7 @@ contract ChartsBet is ChainlinkClient {
      * @param appearances The number of times the artist has appeared in the leaderboard.
      * @return odds The calculated odds for the artist.
      */
-    function calculateOdds(
-        uint rank,
-        uint appearances
-    ) internal pure returns (uint odds) {
+    function calculateOdds(uint rank, uint appearances) internal pure returns (uint odds) {
         uint effectiveRank = (rank + (rank + appearances - 1)) / 2;
         odds = 120 + (effectiveRank - 1) * 20;
     }
@@ -130,12 +86,9 @@ contract ChartsBet is ChainlinkClient {
      * @param country The country for which the leaderboard is being updated.
      * @param topArtists An array of artist names representing the top artists.
      */
-    function assignRanksAndOdds(
-        string memory country,
-        string[] memory topArtists
-    ) internal {
+    function assignRanksAndOdds(string memory country, string[] memory topArtists) internal {
         Leaderboard storage lb = leaderboards[country];
-        mapping(bytes32 => uint) storage artistAppearances = lb.artistRank;
+        mapping(bytes32 -> uint) storage artistAppearances = lb.artistRank;
 
         for (uint i = 0; i < topArtists.length; i++) {
             bytes32 artistHash = normalizeArtistName(topArtists[i]);
@@ -146,10 +99,7 @@ contract ChartsBet is ChainlinkClient {
             bytes32 artistHash = normalizeArtistName(topArtists[i]);
             if (lb.artistRank[artistHash] == 0) {
                 lb.artistRank[artistHash] = i + 1;
-                lb.artistOdds[artistHash] = calculateOdds(
-                    i + 1,
-                    artistAppearances[artistHash]
-                );
+                lb.artistOdds[artistHash] = calculateOdds(i + 1, artistAppearances[artistHash]);
             }
         }
     }
@@ -160,57 +110,27 @@ contract ChartsBet is ChainlinkClient {
      * @param country The country code for which the leaderboard is created.
      */
     function createLeaderboard(string memory country) public onlyOwner {
-        if (!isValidCountry(country)) revert InvalidCountryCode(country);
+        if (!isValidCountry(country)) {
+            revert InvalidCountryCode();
+        }
 
         if (bytes(leaderboards[country].country).length != 0) {
             revert CountryAlreadyExists();
         }
 
-        bytes32 requestId = requestTopArtists(country);
-        requestIdToCountry[requestId] = country; // Store the mapping from requestId to country
-        emit LeaderboardCreated(requestId, country);
-    }
-
-    /**
-     * @notice Requests the top artists from the oracle for a specific country.
-     * @param country The country code for which to request the leaderboard.
-     * @return requestId The request ID generated for the oracle request.
-     */
-    function requestTopArtists(
-        string memory country
-    ) internal returns (bytes32 requestId) {
-        Chainlink.Request memory request = buildChainlinkRequest(
-            jobId,
-            address(this),
-            this.fulfillTopArtists.selector
-        );
-        string memory url = string(
-            abi.encodePacked(
-                "https://your-node-server.com/leaderboard/",
-                country,
-                "?compact=true"
-            )
-        );
-        request.add("get", url);
-        request.add("path", ""); // Assumes the response is a simple array of strings.
-        requestId = sendChainlinkRequest(request, fee);
-        emit DataRequested(requestId, country);
+        // Emit an event that your off-chain service listens to
+        emit LeaderboardCreated(country);
     }
 
     /**
      * @notice Fulfills the leaderboard data after the artists' rankings are known.
-     * @dev This function is called by the oracle to finalize the leaderboard.
-     * @param _requestId The request ID associated with this fulfillment.
+     * @dev This function is called by the owner/off-chain service to finalize the leaderboard.
+     * @param country The country code for which the leaderboard is fulfilled.
      * @param topArtists An array of the top artist names.
      */
-    function fulfillTopArtists(
-        bytes32 _requestId,
-        string[] memory topArtists
-    ) public recordChainlinkFulfillment(_requestId) {
-        string memory country = extractCountryFromRequestId(_requestId);
-
-        if (bytes(leaderboards[country].country).length != 0) {
-            revert CountryAlreadyExists();
+    function fulfillTopArtists(string memory country, string[] memory topArtists) public onlyOwner {
+        if (!isValidCountry(country)) {
+            revert InvalidCountryCode();
         }
 
         Leaderboard storage newLeaderboard = leaderboards[country];
@@ -220,91 +140,33 @@ contract ChartsBet is ChainlinkClient {
         countryList.push(country);
 
         assignRanksAndOdds(country, topArtists);
-        emit DataFulfilled(_requestId, country, topArtists);
+        emit DataFulfilled(country, topArtists);
     }
 
     /**
-     * @notice Requests the winning artist for a specific country after the betting period ends.
-     * @dev Only the owner can request the winning artist, and the betting period must have ended.
-     * @param country The country code for which the winning artist is requested.
+     * @notice Fulfills the winning artist and distributes winnings to the bettors.
+     * @dev The owner/off-chain service fulfills the request and transfers the winnings to the respective bettors.
+     * @param country The country code for which the winning artist is fulfilled.
+     * @param winningArtist The winning artist's name.
      */
-    function requestWinningArtist(string memory country) public onlyOwner {
-        if (!isValidCountry(country)) revert InvalidCountryCode(country);
-
+    function fulfillDailyWinner(string memory country, string memory winningArtist) public onlyOwner {
         Leaderboard storage lb = leaderboards[country];
-        if (lb.isClosed) revert BettingClosed();
-        if (block.timestamp < lb.startTime + WEEK_DURATION)
-            revert BettingPeriodNotEndedYet();
+        if (lb.isClosed) {
+            revert BettingClosed();
+        }
 
-        bytes32 requestId = requestDailyWinner(country);
-        requestIdToCountry[requestId] = country; // Store the mapping from requestId to country
-        emit DataRequested(requestId, country);
+        lb.winningArtist = winningArtist;
         lb.isClosed = true;
-    }
 
-    /**
-     * @notice Requests the daily winner from the oracle for a specific country.
-     * @param country The country code for which to request the daily winner.
-     * @return requestId The request ID generated for the oracle request.
-     */
-    function requestDailyWinner(
-        string memory country
-    ) internal returns (bytes32 requestId) {
-        Chainlink.Request memory request = buildChainlinkRequest(
-            jobId,
-            address(this),
-            this.fulfillDailyWinner.selector
-        );
-        string memory url = string(
-            abi.encodePacked(
-                "https://your-node-server.com/daily-winner/",
-                country
-            )
-        );
-        request.add("get", url);
-        request.add("path", "artist"); // Assumes the response contains the artist field with the winner's name.
-        requestId = sendChainlinkRequest(request, fee);
-        return requestId;
-    }
-
-    /**
-     * @notice Fulfills the winning artist and distributes winnings to the betters.
-     * @dev The owner fulfills the request and transfers the winnings to the respective betters.
-     * @param _requestId The request ID associated with this fulfillment.
-     * @param _winningArtist The winning artist's name.
-     */
-    function fulfillDailyWinner(
-        bytes32 _requestId,
-        string memory _winningArtist
-    ) public recordChainlinkFulfillment(_requestId) {
-        string memory country = extractCountryFromRequestId(_requestId);
-        Leaderboard storage lb = leaderboards[country];
-        lb.winningArtist = _winningArtist;
-
-        emit RequestWinningArtist(_requestId, country, _winningArtist);
+        emit RequestWinningArtist(country, winningArtist);
 
         for (uint i = 0; i < lb.bets.length; i++) {
             Bet storage bet = lb.bets[i];
-            if (
-                normalizeArtistName(bet.artist) ==
-                normalizeArtistName(_winningArtist)
-            ) {
+            if (normalizeArtistName(bet.artist) == normalizeArtistName(winningArtist)) {
                 uint winnings = (bet.amount * bet.odds) / 100;
                 payable(bet.user).transfer(winnings);
             }
         }
-    }
-
-    /**
-     * @notice Extracts the country code from the request ID.
-     * @dev This function retrieves the country associated with a given request ID.
-     * @param requestId The request ID generated for the oracle request.
-     * @return country The country code extracted from the request ID.
-     */
-    function extractCountryFromRequestId(
-        bytes32 requestId
-    ) internal view returns (string memory) {
-        return requestIdToCountry[requestId];
     }
 
     /**
@@ -321,14 +183,8 @@ contract ChartsBet is ChainlinkClient {
      * @param artist The artist's name.
      * @return The total amount of bets placed on the artist.
      */
-    function getTotalBetsOnArtist(
-        string memory country,
-        string memory artist
-    ) public view returns (uint) {
-        return
-            leaderboards[country].totalBetsOnArtist[
-                normalizeArtistName(artist)
-            ];
+    function getTotalBetsOnArtist(string memory country, string memory artist) public view returns (uint) {
+        return leaderboards[country].totalBetsOnArtist[normalizeArtistName(artist)];
     }
 
     /**
@@ -336,9 +192,7 @@ contract ChartsBet is ChainlinkClient {
      * @param country The country code.
      * @return The total bet amount.
      */
-    function getTotalBetAmount(
-        string memory country
-    ) public view returns (uint) {
+    function getTotalBetAmount(string memory country) public view returns (uint) {
         return leaderboards[country].totalBetAmount;
     }
 
@@ -347,9 +201,7 @@ contract ChartsBet is ChainlinkClient {
      * @param country The country code.
      * @return An array of Bet structs representing all the bets placed.
      */
-    function getBetsInCountry(
-        string memory country
-    ) public view returns (Bet[] memory) {
+    function getBetsInCountry(string memory country) public view returns (Bet[] memory) {
         Leaderboard storage lb = leaderboards[country];
         Bet[] memory bets = new Bet[](lb.bets.length);
         for (uint i = 0; i < lb.bets.length; i++) {
@@ -363,14 +215,9 @@ contract ChartsBet is ChainlinkClient {
      * @param country The country code to validate.
      * @return True if the country code is valid, false otherwise.
      */
-    function isValidCountry(
-        string memory country
-    ) internal view returns (bool) {
+    function isValidCountry(string memory country) internal view returns (bool) {
         for (uint i = 0; i < validCountries.length; i++) {
-            if (
-                keccak256(abi.encodePacked(validCountries[i])) ==
-                keccak256(abi.encodePacked(country))
-            ) {
+            if (keccak256(abi.encodePacked(validCountries[i])) == keccak256(abi.encodePacked(country))) {
                 return true;
             }
         }
