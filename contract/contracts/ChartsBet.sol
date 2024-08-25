@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import './Errors.sol';
+import "./Errors.sol";
 
 contract ChartsBet {
     struct Bet {
@@ -27,6 +27,7 @@ contract ChartsBet {
     string[] public countryList;
 
     address public owner;
+    address public oracleAddress; // Address of the Oracle contract
     uint private constant WEEK_DURATION = 7 days;
     string[8] private validCountries = [
         "WW",
@@ -40,9 +41,12 @@ contract ChartsBet {
     ];
 
     event LeaderboardCreated(string country);
-    event DataFulfilled(string country, string[] topArtists);
-    event RequestWinningArtist(string country, string winningArtist);
-    event BetPlaced(address indexed user, string country, string artist, uint amount);
+    event BetPlaced(
+        address indexed user,
+        string country,
+        string artist,
+        uint amount
+    );
 
     modifier onlyOwner() {
         if (msg.sender != owner) {
@@ -51,11 +55,19 @@ contract ChartsBet {
         _;
     }
 
+    modifier onlyOracle() {
+        if (msg.sender != oracleAddress) {
+            revert Unauthorized();
+        }
+        _;
+    }
+
     /**
      * @notice Contract constructor, sets the deployer as the owner.
      */
-    constructor() {
+    constructor(address _oracleAddress) {
         owner = msg.sender;
+        oracleAddress = _oracleAddress;
     }
 
     /**
@@ -64,7 +76,9 @@ contract ChartsBet {
      * @param artist The artist's name as a string.
      * @return The hashed artist name as bytes32.
      */
-    function normalizeArtistName(string memory artist) internal pure returns (bytes32) {
+    function normalizeArtistName(
+        string memory artist
+    ) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(artist));
     }
 
@@ -75,7 +89,10 @@ contract ChartsBet {
      * @param appearances The number of times the artist has appeared in the leaderboard.
      * @return odds The calculated odds for the artist.
      */
-    function calculateOdds(uint rank, uint appearances) internal pure returns (uint odds) {
+    function calculateOdds(
+        uint rank,
+        uint appearances
+    ) internal pure returns (uint odds) {
         uint effectiveRank = (rank + (rank + appearances - 1)) / 2;
         odds = 120 + (effectiveRank - 1) * 20;
     }
@@ -86,9 +103,12 @@ contract ChartsBet {
      * @param country The country for which the leaderboard is being updated.
      * @param topArtists An array of artist names representing the top artists.
      */
-    function assignRanksAndOdds(string memory country, string[] memory topArtists) internal {
+    function assignRanksAndOdds(
+        string memory country,
+        string[] memory topArtists
+    ) internal {
         Leaderboard storage lb = leaderboards[country];
-        mapping(bytes32 -> uint) storage artistAppearances = lb.artistRank;
+        mapping(bytes32 => uint) storage artistAppearances = lb.artistRank;
 
         for (uint i = 0; i < topArtists.length; i++) {
             bytes32 artistHash = normalizeArtistName(topArtists[i]);
@@ -99,7 +119,10 @@ contract ChartsBet {
             bytes32 artistHash = normalizeArtistName(topArtists[i]);
             if (lb.artistRank[artistHash] == 0) {
                 lb.artistRank[artistHash] = i + 1;
-                lb.artistOdds[artistHash] = calculateOdds(i + 1, artistAppearances[artistHash]);
+                lb.artistOdds[artistHash] = calculateOdds(
+                    i + 1,
+                    artistAppearances[artistHash]
+                );
             }
         }
     }
@@ -118,17 +141,20 @@ contract ChartsBet {
             revert CountryAlreadyExists();
         }
 
-        // Emit an event that your off-chain service listens to
+        // Emit an event that the Oracle contract listens to
         emit LeaderboardCreated(country);
     }
 
     /**
      * @notice Fulfills the leaderboard data after the artists' rankings are known.
-     * @dev This function is called by the owner/off-chain service to finalize the leaderboard.
+     * @dev This function is called by the Oracle contract to finalize the leaderboard.
      * @param country The country code for which the leaderboard is fulfilled.
      * @param topArtists An array of the top artist names.
      */
-    function fulfillTopArtists(string memory country, string[] memory topArtists) public onlyOwner {
+    function fulfillTopArtists(
+        string memory country,
+        string[] memory topArtists
+    ) public onlyOracle {
         if (!isValidCountry(country)) {
             revert InvalidCountryCode();
         }
@@ -140,16 +166,18 @@ contract ChartsBet {
         countryList.push(country);
 
         assignRanksAndOdds(country, topArtists);
-        emit DataFulfilled(country, topArtists);
     }
 
     /**
      * @notice Fulfills the winning artist and distributes winnings to the bettors.
-     * @dev The owner/off-chain service fulfills the request and transfers the winnings to the respective bettors.
+     * @dev The Oracle contract fulfills the request and transfers the winnings to the respective bettors.
      * @param country The country code for which the winning artist is fulfilled.
      * @param winningArtist The winning artist's name.
      */
-    function fulfillDailyWinner(string memory country, string memory winningArtist) public onlyOwner {
+    function fulfillDailyWinner(
+        string memory country,
+        string memory winningArtist
+    ) public onlyOracle {
         Leaderboard storage lb = leaderboards[country];
         if (lb.isClosed) {
             revert BettingClosed();
@@ -158,11 +186,12 @@ contract ChartsBet {
         lb.winningArtist = winningArtist;
         lb.isClosed = true;
 
-        emit RequestWinningArtist(country, winningArtist);
-
         for (uint i = 0; i < lb.bets.length; i++) {
             Bet storage bet = lb.bets[i];
-            if (normalizeArtistName(bet.artist) == normalizeArtistName(winningArtist)) {
+            if (
+                normalizeArtistName(bet.artist) ==
+                normalizeArtistName(winningArtist)
+            ) {
                 uint winnings = (bet.amount * bet.odds) / 100;
                 payable(bet.user).transfer(winnings);
             }
@@ -183,8 +212,14 @@ contract ChartsBet {
      * @param artist The artist's name.
      * @return The total amount of bets placed on the artist.
      */
-    function getTotalBetsOnArtist(string memory country, string memory artist) public view returns (uint) {
-        return leaderboards[country].totalBetsOnArtist[normalizeArtistName(artist)];
+    function getTotalBetsOnArtist(
+        string memory country,
+        string memory artist
+    ) public view returns (uint) {
+        return
+            leaderboards[country].totalBetsOnArtist[
+                normalizeArtistName(artist)
+            ];
     }
 
     /**
@@ -192,7 +227,9 @@ contract ChartsBet {
      * @param country The country code.
      * @return The total bet amount.
      */
-    function getTotalBetAmount(string memory country) public view returns (uint) {
+    function getTotalBetAmount(
+        string memory country
+    ) public view returns (uint) {
         return leaderboards[country].totalBetAmount;
     }
 
@@ -201,7 +238,9 @@ contract ChartsBet {
      * @param country The country code.
      * @return An array of Bet structs representing all the bets placed.
      */
-    function getBetsInCountry(string memory country) public view returns (Bet[] memory) {
+    function getBetsInCountry(
+        string memory country
+    ) public view returns (Bet[] memory) {
         Leaderboard storage lb = leaderboards[country];
         Bet[] memory bets = new Bet[](lb.bets.length);
         for (uint i = 0; i < lb.bets.length; i++) {
@@ -215,9 +254,14 @@ contract ChartsBet {
      * @param country The country code to validate.
      * @return True if the country code is valid, false otherwise.
      */
-    function isValidCountry(string memory country) internal view returns (bool) {
+    function isValidCountry(
+        string memory country
+    ) internal view returns (bool) {
         for (uint i = 0; i < validCountries.length; i++) {
-            if (keccak256(abi.encodePacked(validCountries[i])) == keccak256(abi.encodePacked(country))) {
+            if (
+                keccak256(abi.encodePacked(validCountries[i])) ==
+                keccak256(abi.encodePacked(country))
+            ) {
                 return true;
             }
         }

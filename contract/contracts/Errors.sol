@@ -6,3 +6,5 @@ error InvalidCountryCode();
 error CountryAlreadyExists();
 error BettingClosed();
 error BettingPeriodNotEndedYet();
+error RequestNotPending();
+error OracleAlreadySet();
