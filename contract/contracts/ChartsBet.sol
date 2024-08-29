@@ -39,16 +39,7 @@ contract ChartsBet is
 
     ChartsOracle public oracle; // Direct reference to the Oracle contract
     uint private constant WEEK_DURATION = 7 days;
-    string[8] private validCountries = [
-        "WW",
-        "BR",
-        "DE",
-        "ES",
-        "FR",
-        "IT",
-        "PT",
-        "US"
-    ];
+    string[8] private validCountries;
 
     event LeaderboardCreated(string country);
     event BetPlaced(
@@ -58,12 +49,13 @@ contract ChartsBet is
         uint amount
     );
 
-    function initialize() public initializer {
-        __Ownable_init(msg.sender);
+    function initialize(address _owner) public initializer {
+        __Ownable_init(_owner);
         __Pausable_init();
         __ReentrancyGuard_init();
 
         oracle = new ChartsOracle();
+        validCountries = ["WW", "BR", "DE", "ES", "FR", "IT", "PT", "US"];
     }
 
     function normalizeArtistName(

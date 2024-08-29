@@ -14,5 +14,7 @@
 		"dotenv": "16.4.5",
 		"hardhat": "2.22.9"
 	},
-	"dependencies": {}
+	"dependencies": {
+		"@openzeppelin/hardhat-upgrades": "^3.2.1"
+	}
 }
