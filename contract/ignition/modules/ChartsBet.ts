@@ -1,17 +1,20 @@
-import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
+import { buildModule } from '@nomicfoundation/hardhat-ignition/modules';
+import ChartsOracleModule from './ChartsOracle';
 
-const JAN_1ST_2030 = 1893456000;
-const ONE_GWEI: bigint = 1_000_000_000n;
+const ChartsBetModule = buildModule('ChartsBet', (m) => {
+	const { chartsOracle } = m.useModule(ChartsOracleModule);
 
-const LockModule = buildModule("LockModule", (m) => {
-  const unlockTime = m.getParameter("unlockTime", JAN_1ST_2030);
-  const lockedAmount = m.getParameter("lockedAmount", ONE_GWEI);
+	const chartsBet = m.contract('ChartsBet');
 
-  const lock = m.contract("Lock", [unlockTime], {
-    value: lockedAmount,
-  });
+	const initialize = m.call(chartsBet, 'initialize', [
+		m.getAccount(0),
+		chartsOracle,
+	]);
 
-  return { lock };
+	// Update the ChartsOracle with the ChartsBet address
+	const updateChartsBet = m.call(chartsOracle, 'setChartsBet', [chartsBet]);
+
+	return { chartsBet, initialize, updateChartsBet };
 });
 
-export default LockModule;
+export default ChartsBetModule;
