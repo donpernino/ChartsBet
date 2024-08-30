@@ -210,7 +210,7 @@ contract ChartsBet is
     }
 
     function updateOracle(address newOracle) public onlyOwner {
-        require(newOracle != address(0), "Invalid oracle address");
+        if (newOracle == address(0)) revert InvalidOracleAddress();
         oracle = ChartsOracle(newOracle);
         emit OracleUpdated(newOracle);
     }
@@ -256,11 +256,10 @@ contract ChartsBet is
     }
 
     function executeWithdrawal() public onlyOwner {
-        require(
-            block.timestamp >= withdrawalRequestTime + WITHDRAWAL_DELAY,
-            "Withdrawal delay not met"
-        );
-        require(address(this).balance > 0, "No funds to withdraw");
+        if (block.timestamp < withdrawalRequestTime + WITHDRAWAL_DELAY)
+            revert WithdrawalDelayNotMet();
+        if (address(this).balance == 0) revert NoFundsToWithdraw();
+
         uint256 amount = address(this).balance;
         payable(owner()).transfer(amount);
         withdrawalRequestTime = 0;

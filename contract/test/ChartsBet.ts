@@ -239,9 +239,9 @@ describe('ChartsBet Contract', function () {
 
 		it('Should not allow withdrawal execution before delay', async function () {
 			await chartsBet.requestWithdrawal();
-			await expect(chartsBet.executeWithdrawal()).to.be.revertedWith(
-				'Withdrawal delay not met'
-			);
+			await expect(
+				chartsBet.executeWithdrawal()
+			).to.be.revertedWithCustomError(chartsBet, 'WithdrawalDelayNotMet');
 		});
 	});
 
