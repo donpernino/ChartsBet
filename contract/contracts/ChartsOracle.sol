@@ -42,20 +42,32 @@ contract ChartsOracle is
         bytes32 country
     ) public whenNotPaused returns (bytes32 requestId) {
         requestId = keccak256(
-            abi.encodePacked(msg.sender, block.timestamp, country)
+            abi.encodePacked(
+                msg.sender,
+                block.timestamp,
+                country,
+                "leaderboard"
+            )
         );
         pendingRequests[requestId] = true;
         emit RequestLeaderboardData(requestId, country);
+        return requestId;
     }
 
     function requestDailyWinner(
         bytes32 country
     ) public whenNotPaused returns (bytes32 requestId) {
         requestId = keccak256(
-            abi.encodePacked(msg.sender, block.timestamp, country)
+            abi.encodePacked(
+                msg.sender,
+                block.timestamp,
+                country,
+                "dailyWinner"
+            )
         );
         pendingRequests[requestId] = true;
         emit RequestDailyWinner(requestId, country);
+        return requestId;
     }
 
     function fulfillLeaderboardData(
@@ -63,9 +75,7 @@ contract ChartsOracle is
         bytes32 country,
         string[] memory topArtists
     ) public onlyOwner whenNotPaused {
-        if (!pendingRequests[requestId]) {
-            revert RequestNotPending();
-        }
+        require(pendingRequests[requestId], "Request not pending");
         delete pendingRequests[requestId];
 
         chartsBet.fulfillTopArtists(country, topArtists);
@@ -77,9 +87,7 @@ contract ChartsOracle is
         bytes32 country,
         string memory winningArtist
     ) public onlyOwner whenNotPaused {
-        if (!pendingRequests[requestId]) {
-            revert RequestNotPending();
-        }
+        require(pendingRequests[requestId], "Request not pending");
         delete pendingRequests[requestId];
 
         chartsBet.fulfillDailyWinner(country, winningArtist);

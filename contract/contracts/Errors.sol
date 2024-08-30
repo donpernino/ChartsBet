@@ -9,6 +9,7 @@ error InvalidCountryCode();
 error LeaderboardAlreadyClosed();
 error LeaderboardNotFound();
 error LeaderboardStillActive();
+error OnlyOracleAllowed();
 error OracleAlreadySet();
 error RequestNotPending();
 error Unauthorized();
