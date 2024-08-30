@@ -17,75 +17,269 @@ contract ChartsBet is
 {
     struct Bet {
         address user;
-        uint amount;
+        uint256 amount;
         string artist;
-        uint odds; // Odds associated with the bet
+        uint256 odds;
     }
 
     struct Leaderboard {
-        string country;
+        bytes32 country;
         string winningArtist;
         bool isClosed;
-        uint totalBetAmount;
-        uint startTime;
-        mapping(bytes32 => uint) totalBetsOnArtist;
-        mapping(bytes32 => uint) artistRank; // Rank for each artist in the leaderboard
-        mapping(bytes32 => uint) artistOdds; // Odds for each artist in the leaderboard
+        uint256 totalBetAmount;
+        uint256 startTime;
+        mapping(bytes32 => uint256) totalBetsOnArtist;
+        mapping(bytes32 => uint256) artistRank;
+        mapping(bytes32 => uint256) artistOdds;
         Bet[] bets;
     }
 
-    mapping(string => Leaderboard) public leaderboards;
-    string[] public countryList;
+    mapping(bytes32 => Leaderboard) public leaderboards;
+    bytes32[] public countryList;
 
-    ChartsOracle public oracle; // Direct reference to the Oracle contract
-    uint private constant WEEK_DURATION = 7 days;
-    string[8] private validCountries;
+    ChartsOracle public oracle;
+    uint256 public constant LEADERBOARD_DURATION = 7 days;
+    mapping(bytes32 => bool) public validCountries;
 
-    event LeaderboardCreated(string country);
+    uint256 public constant WITHDRAWAL_DELAY = 2 days;
+    uint256 public withdrawalRequestTime;
+
+    event LeaderboardCreated(bytes32 indexed country);
+    event LeaderboardClosed(bytes32 indexed country);
     event BetPlaced(
         address indexed user,
-        string country,
+        bytes32 indexed country,
         string artist,
-        uint amount
+        uint256 amount
     );
+    event TopArtistsFulfilled(bytes32 indexed country);
+    event DailyWinnerFulfilled(bytes32 indexed country, string winningArtist);
+    event OracleUpdated(address newOracle);
+    event WithdrawalRequested(uint256 requestTime);
+    event WithdrawalExecuted(uint256 amount);
 
-    function initialize(address _owner) public initializer {
+    function initialize(address _owner, address _oracle) public initializer {
         __Ownable_init(_owner);
         __Pausable_init();
         __ReentrancyGuard_init();
 
-        oracle = new ChartsOracle();
-        validCountries = ["WW", "BR", "DE", "ES", "FR", "IT", "PT", "US"];
+        oracle = ChartsOracle(_oracle);
+        bytes32[8] memory countries = [
+            bytes32("WW"),
+            bytes32("BR"),
+            bytes32("DE"),
+            bytes32("ES"),
+            bytes32("FR"),
+            bytes32("IT"),
+            bytes32("PT"),
+            bytes32("US")
+        ];
+        for (uint i = 0; i < countries.length; i++) {
+            validCountries[countries[i]] = true;
+        }
     }
 
-    function normalizeArtistName(
+    function createLeaderboard(bytes32 country) public onlyOwner whenNotPaused {
+        if (!validCountries[country]) {
+            revert InvalidCountryCode();
+        }
+
+        Leaderboard storage existingLeaderboard = leaderboards[country];
+        if (existingLeaderboard.country != bytes32(0)) {
+            if (
+                !existingLeaderboard.isClosed &&
+                block.timestamp <
+                existingLeaderboard.startTime + LEADERBOARD_DURATION
+            ) {
+                revert LeaderboardStillActive();
+            }
+            delete leaderboards[country];
+        }
+
+        Leaderboard storage newLeaderboard = leaderboards[country];
+        newLeaderboard.country = country;
+        newLeaderboard.isClosed = false;
+        newLeaderboard.startTime = block.timestamp;
+        newLeaderboard.totalBetAmount = 0;
+        countryList.push(country);
+
+        emit LeaderboardCreated(country);
+    }
+
+    function closeLeaderboard(bytes32 country) public onlyOwner {
+        Leaderboard storage leaderboard = leaderboards[country];
+        if (leaderboard.country == bytes32(0)) {
+            revert LeaderboardNotFound();
+        }
+        if (leaderboard.isClosed) {
+            revert LeaderboardAlreadyClosed();
+        }
+        leaderboard.isClosed = true;
+        emit LeaderboardClosed(country);
+    }
+
+    function isLeaderboardExpired(bytes32 country) public view returns (bool) {
+        Leaderboard storage leaderboard = leaderboards[country];
+        return block.timestamp >= leaderboard.startTime + LEADERBOARD_DURATION;
+    }
+
+    function placeBet(
+        bytes32 country,
         string memory artist
-    ) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(artist));
+    ) public payable whenNotPaused nonReentrant {
+        Leaderboard storage leaderboard = leaderboards[country];
+        if (leaderboard.country == bytes32(0)) {
+            revert LeaderboardNotFound();
+        }
+        if (leaderboard.isClosed || isLeaderboardExpired(country)) {
+            revert BettingClosed();
+        }
+
+        bytes32 artistHash = keccak256(abi.encodePacked(artist));
+        uint256 odds = leaderboard.artistOdds[artistHash];
+        if (odds == 0) {
+            revert ArtistNotInLeaderboard();
+        }
+
+        leaderboard.totalBetAmount += msg.value;
+        leaderboard.totalBetsOnArtist[artistHash] += msg.value;
+        leaderboard.bets.push(
+            Bet({
+                user: msg.sender,
+                amount: msg.value,
+                artist: artist,
+                odds: odds
+            })
+        );
+
+        emit BetPlaced(msg.sender, country, artist, msg.value);
     }
 
-    function calculateOdds(
-        uint rank,
-        uint appearances
-    ) internal pure returns (uint odds) {
-        uint effectiveRank = (rank + (rank + appearances - 1)) / 2;
-        odds = 120 + (effectiveRank - 1) * 20;
+    function fulfillTopArtists(
+        bytes32 country,
+        string[] memory topArtists
+    ) public onlyOwner whenNotPaused {
+        if (!validCountries[country]) {
+            revert InvalidCountryCode();
+        }
+
+        Leaderboard storage leaderboard = leaderboards[country];
+        if (leaderboard.country == bytes32(0)) {
+            revert LeaderboardNotFound();
+        }
+
+        if (leaderboard.isClosed) {
+            revert LeaderboardAlreadyClosed();
+        }
+
+        assignRanksAndOdds(country, topArtists);
+        emit TopArtistsFulfilled(country);
+    }
+
+    function fulfillDailyWinner(
+        bytes32 country,
+        string memory winningArtist
+    ) public onlyOwner whenNotPaused nonReentrant {
+        Leaderboard storage lb = leaderboards[country];
+        if (lb.country == bytes32(0)) {
+            revert LeaderboardNotFound();
+        }
+        if (lb.isClosed) {
+            revert BettingClosed();
+        }
+
+        lb.winningArtist = winningArtist;
+        lb.isClosed = true;
+
+        bytes32 winningArtistHash = keccak256(abi.encodePacked(winningArtist));
+        for (uint i = 0; i < lb.bets.length; i++) {
+            Bet storage bet = lb.bets[i];
+            if (keccak256(abi.encodePacked(bet.artist)) == winningArtistHash) {
+                uint256 winnings = (bet.amount * bet.odds) / 100;
+                payable(bet.user).transfer(winnings);
+            }
+        }
+
+        emit DailyWinnerFulfilled(country, winningArtist);
+        emit LeaderboardClosed(country);
+    }
+
+    function updateOracle(address newOracle) public onlyOwner {
+        require(newOracle != address(0), "Invalid oracle address");
+        oracle = ChartsOracle(newOracle);
+        emit OracleUpdated(newOracle);
+    }
+
+    function getArtistOdds(
+        bytes32 country,
+        string memory artist
+    ) public view returns (uint256) {
+        return
+            leaderboards[country].artistOdds[
+                keccak256(abi.encodePacked(artist))
+            ];
+    }
+
+    function getTotalBetsOnArtist(
+        bytes32 country,
+        string memory artist
+    ) public view returns (uint256) {
+        return
+            leaderboards[country].totalBetsOnArtist[
+                keccak256(abi.encodePacked(artist))
+            ];
+    }
+
+    function getTotalBetAmount(bytes32 country) public view returns (uint256) {
+        return leaderboards[country].totalBetAmount;
+    }
+
+    function getBetsInCountry(
+        bytes32 country
+    ) public view returns (Bet[] memory) {
+        Leaderboard storage lb = leaderboards[country];
+        return lb.bets;
+    }
+
+    function toggleContractActive() public onlyOwner {
+        if (paused()) {
+            _unpause();
+        } else {
+            _pause();
+        }
+    }
+
+    function requestWithdrawal() public onlyOwner {
+        withdrawalRequestTime = block.timestamp;
+        emit WithdrawalRequested(withdrawalRequestTime);
+    }
+
+    function executeWithdrawal() public onlyOwner {
+        require(
+            block.timestamp >= withdrawalRequestTime + WITHDRAWAL_DELAY,
+            "Withdrawal delay not met"
+        );
+        require(address(this).balance > 0, "No funds to withdraw");
+        uint256 amount = address(this).balance;
+        payable(owner()).transfer(amount);
+        withdrawalRequestTime = 0;
+        emit WithdrawalExecuted(amount);
     }
 
     function assignRanksAndOdds(
-        string memory country,
+        bytes32 country,
         string[] memory topArtists
     ) internal {
         Leaderboard storage lb = leaderboards[country];
-        mapping(bytes32 => uint) storage artistAppearances = lb.artistRank;
+        mapping(bytes32 => uint256) storage artistAppearances = lb.artistRank;
 
         for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artistHash = normalizeArtistName(topArtists[i]);
+            bytes32 artistHash = keccak256(abi.encodePacked(topArtists[i]));
             artistAppearances[artistHash]++;
         }
 
         for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artistHash = normalizeArtistName(topArtists[i]);
+            bytes32 artistHash = keccak256(abi.encodePacked(topArtists[i]));
             if (lb.artistRank[artistHash] == 0) {
                 lb.artistRank[artistHash] = i + 1;
                 lb.artistOdds[artistHash] = calculateOdds(
@@ -96,112 +290,12 @@ contract ChartsBet is
         }
     }
 
-    function createLeaderboard(
-        string memory country
-    ) public onlyOwner whenNotPaused {
-        if (!isValidCountry(country)) {
-            revert InvalidCountryCode();
-        }
-
-        if (bytes(leaderboards[country].country).length != 0) {
-            revert CountryAlreadyExists();
-        }
-
-        emit LeaderboardCreated(country);
-    }
-
-    function fulfillTopArtists(
-        string memory country,
-        string[] memory topArtists
-    ) public onlyOwner whenNotPaused {
-        if (!isValidCountry(country)) {
-            revert InvalidCountryCode();
-        }
-
-        Leaderboard storage newLeaderboard = leaderboards[country];
-        newLeaderboard.country = country;
-        newLeaderboard.isClosed = false;
-        newLeaderboard.startTime = block.timestamp;
-        countryList.push(country);
-
-        assignRanksAndOdds(country, topArtists);
-    }
-
-    function fulfillDailyWinner(
-        string memory country,
-        string memory winningArtist
-    ) public onlyOwner whenNotPaused {
-        Leaderboard storage lb = leaderboards[country];
-        if (lb.isClosed) {
-            revert BettingClosed();
-        }
-
-        lb.winningArtist = winningArtist;
-        lb.isClosed = true;
-
-        for (uint i = 0; i < lb.bets.length; i++) {
-            Bet storage bet = lb.bets[i];
-            if (
-                normalizeArtistName(bet.artist) ==
-                normalizeArtistName(winningArtist)
-            ) {
-                uint winnings = (bet.amount * bet.odds) / 100;
-                payable(bet.user).transfer(winnings);
-            }
-        }
-    }
-
-    function emergencyWithdraw() public onlyOwner nonReentrant {
-        payable(owner()).transfer(address(this).balance);
-    }
-
-    function getTotalBetsOnArtist(
-        string memory country,
-        string memory artist
-    ) public view returns (uint) {
-        return
-            leaderboards[country].totalBetsOnArtist[
-                normalizeArtistName(artist)
-            ];
-    }
-
-    function getTotalBetAmount(
-        string memory country
-    ) public view returns (uint) {
-        return leaderboards[country].totalBetAmount;
-    }
-
-    function getBetsInCountry(
-        string memory country
-    ) public view returns (Bet[] memory) {
-        Leaderboard storage lb = leaderboards[country];
-        Bet[] memory bets = new Bet[](lb.bets.length);
-        for (uint i = 0; i < lb.bets.length; i++) {
-            bets[i] = lb.bets[i];
-        }
-        return bets;
-    }
-
-    function isValidCountry(
-        string memory country
-    ) internal view returns (bool) {
-        for (uint i = 0; i < validCountries.length; i++) {
-            if (
-                keccak256(abi.encodePacked(validCountries[i])) ==
-                keccak256(abi.encodePacked(country))
-            ) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    function pause() public onlyOwner {
-        _pause();
-    }
-
-    function unpause() public onlyOwner {
-        _unpause();
+    function calculateOdds(
+        uint256 rank,
+        uint256 appearances
+    ) internal pure returns (uint256 odds) {
+        uint256 effectiveRank = (rank + (rank + appearances - 1)) / 2;
+        odds = 120 + (effectiveRank - 1) * 20;
     }
 
     // Add a gap for future variable additions without affecting storage layout
