@@ -20,6 +20,7 @@ interface Track {
 	name: string;
 	url: string;
 	image: string;
+	odds: number;
 }
 
 type Leaderboards = {
@@ -45,6 +46,11 @@ const getSpotifyToken = async (): Promise<string> => {
 	return tokenResponse.data.access_token;
 };
 
+function calculateOdds(rank: number, appearances: number): number {
+	const effectiveRank = (rank + (rank + appearances - 1)) / 2;
+	return 120 + (effectiveRank - 1) * 20;
+}
+
 const fetchLeaderboard = async (country: Country) => {
 	try {
 		const accessToken = await getSpotifyToken();
@@ -63,15 +69,29 @@ const fetchLeaderboard = async (country: Country) => {
 			}
 		);
 
-		leaderboard[country] = response.data.items.map(
-			(item: any, index: number) => ({
-				rank: index + 1,
-				artist: item.track.artists[0].name,
+		const tracks = response.data.items;
+		const artistAppearances: { [key: string]: number } = {};
+
+		// Count artist appearances
+		tracks.forEach((item: any) => {
+			const artist = item.track.artists[0].name;
+			artistAppearances[artist] = (artistAppearances[artist] || 0) + 1;
+		});
+
+		leaderboard[country] = tracks.map((item: any, index: number) => {
+			const rank = index + 1;
+			const artist = item.track.artists[0].name;
+			const odds = calculateOdds(rank, artistAppearances[artist]);
+
+			return {
+				rank,
+				artist,
 				name: item.track.name,
 				url: item.track.external_urls.spotify,
 				image: item.track.album.images[0].url,
-			})
-		);
+				odds,
+			};
+		});
 	} catch (error) {
 		console.error(`Error fetching leaderboard for ${country}:`, error);
 	}
@@ -116,9 +136,10 @@ app.get('/leaderboard/:country', (req: Request, res: Response) => {
 	const compact = req.query.compact === 'true';
 
 	if (compact) {
-		const compactLeaderboard = leaderboard[country]?.map(
-			(track) => track.artist
-		);
+		const compactLeaderboard = leaderboard[country]?.map((track) => ({
+			artist: track.artist,
+			odds: track.odds,
+		}));
 		res.json(compactLeaderboard);
 	} else {
 		res.json({

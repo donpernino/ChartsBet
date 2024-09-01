@@ -5,7 +5,7 @@ import { useAccount, useWalletClient } from "wagmi";
 import { BetForm } from "@/components/BetForm";
 import { LeaderboardList } from "@/components/LeaderboardList";
 
-const ORACLE_ADDRESS = "0xE8D603371CA8e88FE580B5410620d5db4fcbc1b9";
+const { NEXT_PUBLIC_ORACLE_ADDRESS } = process.env;
 
 export default async function Home() {
   // const { address, isConnected } = useAccount();

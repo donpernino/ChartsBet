@@ -5,24 +5,7 @@ MusicChartsBet
 
 ---
 
-Hardhat Ignition �
+Deployed Addresses (01/09 - 16:33)
 
-Deploying [ ChartsBet ]
-
-Batch #1
-Executed ChartsBet#ChartsBet
-Executed ChartsOracle#ChartsOracle
-
-Batch #2
-Executed ChartsOracle#ChartsOracle.initialize
-
-Batch #3
-Executed ChartsBet#ChartsBet.initialize
-Executed ChartsBet#ChartsOracle~ChartsOracle.setChartsBet
-
-[ ChartsBet ] successfully deployed �
-
-Deployed Addresses
-
-ChartsBet#ChartsBet - 0x5FbDB2315678afecb367f032d93F642f64180aa3
-ChartsOracle#ChartsOracle - 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+ChartsBet#ChartsBet - 0xFa9D017a1b04d9AA82c350EDebDeea60641e1537
+ChartsOracle#ChartsOracle - 0x54287139da4222664d61e321f0096E3C044a73d4

@@ -1,14 +1,17 @@
 import { createContext, useContext, useState, type FC, type ReactNode } from "react";
 
 interface ArtistContextProps {
-  selectedArtist: string;
-  setSelectedArtist: (artist: string) => void;
+  selectedArtist: {
+    artist: string;
+    odds: number;
+  };
+  setSelectedArtist: (artist: { artist: string; odds: number }) => void;
 }
 
 const ArtistContext = createContext<ArtistContextProps | undefined>(undefined);
 
 export const ArtistProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [selectedArtist, setSelectedArtist] = useState("");
+  const [selectedArtist, setSelectedArtist] = useState(null);
 
   return (
     <ArtistContext.Provider value={{ selectedArtist, setSelectedArtist }}>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-
 import { CheckIcon } from "@chakra-ui/icons";
 import {
   Box,
@@ -16,11 +15,15 @@ import {
   NumberInputField,
   NumberInputStepper,
   Text,
+  Tooltip,
+  Flex,
+  Spacer,
 } from "@chakra-ui/react";
 
 import { useArtist } from "@/contexts/artist";
 import { useCountry } from "@/contexts/country";
 import { getCountry } from "@/utils/getCountryName";
+import { getFormattedOdds } from "@/utils/getFormattedOdds";
 
 const BetForm = () => {
   const { selectedCountry } = useCountry();
@@ -29,58 +32,85 @@ const BetForm = () => {
   const tomorrowsDate = new Date(new Date().getTime() + 24 * 60 * 60 * 1000).toLocaleDateString();
 
   const handleBetChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSelectedArtist(event.target.value);
+    setSelectedArtist(null);
   };
 
   return (
     <Container
       position="fixed"
       maxW="1200px"
-      bg="white"
-      p="8"
+      p="4"
       bottom="4"
       left="50%"
-      transform={["translateX(-50%)"]}
+      transform="translateX(-50%)"
       shadow="xl"
       rounded="12"
+      bg="rgba(255, 255, 255, 0.6)"
+      backdropFilter="blur(10px)"
     >
-      <FormControl flexDirection="column">
+      <FormControl as={Flex} flexDirection="column" alignItems="center">
         <FormLabel
           fontSize="lg"
-          mb="2"
           color="black"
           fontWeight="600"
           display="flex"
           alignItems="center"
+          mb="4"
+          textAlign="center"
         >
           <Text>Who will be</Text>
           <Text rounded="8" bg="gray.100" p="1.5" mx="1.5">
             {getCountry(selectedCountry)}
           </Text>
-          <Text>#1 artist tommorow ({tomorrowsDate})?</Text>
+          <Text>#1 artist tomorrow ({tomorrowsDate})?</Text>
         </FormLabel>
-        <Box display="flex" flexDirection="column" gap="3">
+
+        <Flex flexDirection={["column", "row"]} alignItems="center" w="100%" mb="4">
           <Input
             placeholder="Enter an artist name or pick one from the leaderboard"
-            size="lg"
+            size="md"
             color="black"
-            value={selectedArtist}
+            value={selectedArtist?.artist}
             onChange={handleBetChange}
+            flex="1"
+            mr={[0, 4]}
+            mb={[3, 0]}
           />
-        </Box>
-        <FormLabel fontSize="lg" mt="4" mb="2" fontWeight="600">
-          How much do you want to bet? (in ETH)
-        </FormLabel>
-        <NumberInput defaultValue={0.2} precision={2} step={0.2} size="lg" color="black">
-          <NumberInputField />
-          <NumberInputStepper>
-            <NumberIncrementStepper />
-            <NumberDecrementStepper />
-          </NumberInputStepper>
-        </NumberInput>
-        <Button mt="6" size="lg" variant="solid" leftIcon={<CheckIcon />}>
-          Bet
-        </Button>
+
+          <FormLabel fontSize="lg" fontWeight="600" mb={[2, 0]} mr={[0, 2]}>
+            Bet Amount (ETH)
+          </FormLabel>
+          <NumberInput defaultValue={0.2} precision={2} step={0.2} size="md" color="black" flex="1">
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </Flex>
+
+        <Flex flexDirection="row" alignItems="center" justifyContent="space-between" w="100%">
+          {selectedArtist && (
+            <Tooltip label="Current betting odds" aria-label="Betting odds">
+              <Box
+                bg="green.50"
+                color="green.700"
+                px="3"
+                py="1"
+                borderRadius="full"
+                fontWeight="medium"
+                textAlign="center"
+                mr={[0, 4]}
+              >
+                {getFormattedOdds(selectedArtist?.odds)}x
+              </Box>
+            </Tooltip>
+          )}
+          <Spacer />
+          <Button size="md" variant="solid" leftIcon={<CheckIcon />}>
+            Bet
+          </Button>
+        </Flex>
       </FormControl>
     </Container>
   );
