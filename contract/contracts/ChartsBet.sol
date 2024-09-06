@@ -18,13 +18,13 @@ contract ChartsBet is
     struct Bet {
         address user;
         uint256 amount;
-        string artist;
+        bytes32 artist;
         uint256 odds;
     }
 
     struct Leaderboard {
         bytes32 country;
-        string winningArtist;
+        bytes32 winningArtist;
         bool isClosed;
         uint256 totalBetAmount;
         uint256 startTime;
@@ -49,11 +49,11 @@ contract ChartsBet is
     event BetPlaced(
         address indexed user,
         bytes32 indexed country,
-        string artist,
+        bytes32 artist,
         uint256 amount
     );
     event TopArtistsFulfilled(bytes32 indexed country);
-    event DailyWinnerFulfilled(bytes32 indexed country, string winningArtist);
+    event DailyWinnerFulfilled(bytes32 indexed country, bytes32 winningArtist);
     event OracleUpdated(address newOracle);
     event WithdrawalRequested(uint256 requestTime);
     event WithdrawalExecuted(uint256 amount);
@@ -127,7 +127,7 @@ contract ChartsBet is
 
     function placeBet(
         bytes32 country,
-        string memory artist
+        bytes32 artist
     ) public payable whenNotPaused nonReentrant {
         Leaderboard storage leaderboard = leaderboards[country];
         if (leaderboard.country == bytes32(0)) {
@@ -137,14 +137,13 @@ contract ChartsBet is
             revert BettingClosed();
         }
 
-        bytes32 artistHash = keccak256(abi.encodePacked(artist));
-        uint256 odds = leaderboard.artistOdds[artistHash];
+        uint256 odds = leaderboard.artistOdds[artist];
         if (odds == 0) {
             revert ArtistNotInLeaderboard();
         }
 
         leaderboard.totalBetAmount += msg.value;
-        leaderboard.totalBetsOnArtist[artistHash] += msg.value;
+        leaderboard.totalBetsOnArtist[artist] += msg.value;
         leaderboard.bets.push(
             Bet({
                 user: msg.sender,
@@ -182,7 +181,7 @@ contract ChartsBet is
 
     function fulfillDailyWinner(
         bytes32 country,
-        string memory winningArtist
+        bytes32 winningArtist
     ) public whenNotPaused nonReentrant {
         if (msg.sender != address(oracle)) revert OnlyOracleAllowed();
 
@@ -197,10 +196,9 @@ contract ChartsBet is
         lb.winningArtist = winningArtist;
         lb.isClosed = true;
 
-        bytes32 winningArtistHash = keccak256(abi.encodePacked(winningArtist));
         for (uint i = 0; i < lb.bets.length; i++) {
             Bet storage bet = lb.bets[i];
-            if (keccak256(abi.encodePacked(bet.artist)) == winningArtistHash) {
+            if (bet.artist == winningArtist) {
                 uint256 winnings = (bet.amount * bet.odds) / 100;
                 payable(bet.user).transfer(winnings);
             }
@@ -218,18 +216,16 @@ contract ChartsBet is
 
     function getArtistOdds(
         bytes32 country,
-        string memory artist
+        bytes32 artist
     ) public view returns (uint256) {
-        bytes32 artistHash = keccak256(abi.encodePacked(artist));
-        return leaderboards[country].artistOdds[artistHash];
+        return leaderboards[country].artistOdds[artist];
     }
 
     function getTotalBetsOnArtist(
         bytes32 country,
-        string memory artist
+        bytes32 artist
     ) public view returns (uint256) {
-        bytes32 artistHash = keccak256(abi.encodePacked(artist));
-        return leaderboards[country].totalBetsOnArtist[artistHash];
+        return leaderboards[country].totalBetsOnArtist[artist];
     }
 
     function getTotalBetAmount(bytes32 country) public view returns (uint256) {
@@ -276,26 +272,26 @@ contract ChartsBet is
 
         // Reset previous ranks and odds
         for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artistHash = keccak256(abi.encodePacked(topArtists[i]));
-            lb.artistRank[artistHash] = 0;
-            lb.artistOdds[artistHash] = 0;
-            artistAppearances[artistHash] = 0;
+            bytes32 artist = topArtists[i];
+            lb.artistRank[artist] = 0;
+            lb.artistOdds[artist] = 0;
+            artistAppearances[artist] = 0;
         }
 
         // Count appearances
         for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artistHash = keccak256(abi.encodePacked(topArtists[i]));
-            artistAppearances[artistHash]++;
+            bytes32 artist = topArtists[i];
+            artistAppearances[artist]++;
         }
 
         // Assign ranks and calculate odds
         for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artistHash = keccak256(abi.encodePacked(topArtists[i]));
+            bytes32 artist = topArtists[i];
             uint256 rank = i + 1; // Rank starts at 1
-            lb.artistRank[artistHash] = rank;
-            uint256 odds = calculateOdds(rank, artistAppearances[artistHash]);
-            lb.artistOdds[artistHash] = odds;
-            emit ArtistOddsSet(country, topArtists[i], odds);
+            lb.artistRank[artist] = rank;
+            uint256 odds = calculateOdds(rank, artistAppearances[artist]);
+            lb.artistOdds[artist] = odds;
+            emit ArtistOddsSet(country, artist, odds);
         }
     }
 

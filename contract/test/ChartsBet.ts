@@ -65,6 +65,16 @@ describe('ChartsBet Contract', function () {
 				chartsBet.createLeaderboard(ethers.encodeBytes32String('XX'))
 			).to.be.revertedWithCustomError(chartsBet, 'InvalidCountryCode');
 		});
+
+		it('Should revert if trying to create a leaderboard for an active country', async function () {
+			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
+			await expect(
+				chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'))
+			).to.be.revertedWithCustomError(
+				chartsBet,
+				'LeaderboardStillActive'
+			);
+		});
 	});
 
 	describe('Fulfilling Top Artists', function () {
@@ -79,8 +89,8 @@ describe('ChartsBet Contract', function () {
 				ethers.encodeBytes32String('Leto'),
 				ethers.encodeBytes32String('Lacrim'),
 				ethers.encodeBytes32String('Dadi'),
-				ethers.encodeBytes32String('GIMS'), // Repeated artist
-				ethers.encodeBytes32String('Carbonne'), // Repeated artist
+				ethers.encodeBytes32String('GIMS'),
+				ethers.encodeBytes32String('Carbonne'),
 			];
 
 			const tx = await chartsOracle.requestLeaderboardData(
@@ -104,21 +114,21 @@ describe('ChartsBet Contract', function () {
 				ethers.encodeBytes32String('FR'),
 				ethers.encodeBytes32String('GIMS')
 			);
-			expect(gimsOdds).to.equal(130n); // (120 + (1 + (1 + 2 - 1)) / 2 * 20) = 130
+			expect(gimsOdds).to.equal(130n);
 
 			// Check odds for Carbonne (rank 2, 2 appearances)
 			const carbonneOdds = await chartsBet.getArtistOdds(
 				ethers.encodeBytes32String('FR'),
 				ethers.encodeBytes32String('Carbonne')
 			);
-			expect(carbonneOdds).to.equal(150n); // (120 + (2 + (2 + 2 - 1)) / 2 * 20) = 150
+			expect(carbonneOdds).to.equal(150n);
 
 			// Check odds for Leto (rank 3, 1 appearance)
 			const letoOdds = await chartsBet.getArtistOdds(
 				ethers.encodeBytes32String('FR'),
 				ethers.encodeBytes32String('Leto')
 			);
-			expect(letoOdds).to.equal(160n); // (120 + (3 + (3 + 1 - 1)) / 2 * 20) = 160
+			expect(letoOdds).to.equal(160n);
 		});
 
 		it('Should revert if non-oracle tries to fulfill top artists', async function () {
@@ -164,14 +174,22 @@ describe('ChartsBet Contract', function () {
 			// Place bets
 			await chartsBet
 				.connect(addr1)
-				.placeBet(ethers.encodeBytes32String('FR'), 'GIMS', {
-					value: ethers.parseEther('0.1'),
-				});
+				.placeBet(
+					ethers.encodeBytes32String('FR'),
+					ethers.encodeBytes32String('GIMS'),
+					{
+						value: ethers.parseEther('0.1'),
+					}
+				);
 			await chartsBet
 				.connect(addr2)
-				.placeBet(ethers.encodeBytes32String('FR'), 'Carbonne', {
-					value: ethers.parseEther('0.1'),
-				});
+				.placeBet(
+					ethers.encodeBytes32String('FR'),
+					ethers.encodeBytes32String('Carbonne'),
+					{
+						value: ethers.parseEther('0.1'),
+					}
+				);
 		});
 
 		it('Should correctly distribute winnings based on new odds calculation', async function () {
@@ -191,7 +209,7 @@ describe('ChartsBet Contract', function () {
 			await chartsOracle.fulfillDailyWinner(
 				requestId,
 				ethers.encodeBytes32String('FR'),
-				'GIMS'
+				ethers.encodeBytes32String('GIMS')
 			);
 
 			const finalBalance1 = await ethers.provider.getBalance(
@@ -225,11 +243,14 @@ describe('ChartsBet Contract', function () {
 				chartsOracle.fulfillDailyWinner(
 					requestId,
 					ethers.encodeBytes32String('FR'),
-					'GIMS'
+					ethers.encodeBytes32String('GIMS')
 				)
 			)
 				.to.emit(chartsBet, 'DailyWinnerFulfilled')
-				.withArgs(ethers.encodeBytes32String('FR'), 'GIMS');
+				.withArgs(
+					ethers.encodeBytes32String('FR'),
+					ethers.encodeBytes32String('GIMS')
+				);
 		});
 
 		it('Should revert if trying to fulfill daily winner for a closed leaderboard', async function () {
@@ -241,7 +262,7 @@ describe('ChartsBet Contract', function () {
 			await chartsOracle.fulfillDailyWinner(
 				requestId1,
 				ethers.encodeBytes32String('FR'),
-				'GIMS'
+				ethers.encodeBytes32String('GIMS')
 			);
 
 			const tx2 = await chartsOracle.requestDailyWinner(
@@ -253,7 +274,7 @@ describe('ChartsBet Contract', function () {
 				chartsOracle.fulfillDailyWinner(
 					requestId2,
 					ethers.encodeBytes32String('FR'),
-					'Carbonne'
+					ethers.encodeBytes32String('Carbonne')
 				)
 			).to.be.revertedWithCustomError(chartsBet, 'BettingClosed');
 		});
@@ -288,24 +309,26 @@ describe('ChartsBet Contract', function () {
 			await expect(
 				chartsBet
 					.connect(addr1)
-					.placeBet(ethers.encodeBytes32String('FR'), 'GIMS', {
-						value: betAmount,
-					})
+					.placeBet(
+						ethers.encodeBytes32String('FR'),
+						ethers.encodeBytes32String('GIMS'),
+						{
+							value: betAmount,
+						}
+					)
 			)
 				.to.emit(chartsBet, 'BetPlaced')
 				.withArgs(
 					await addr1.getAddress(),
 					ethers.encodeBytes32String('FR'),
-					'GIMS',
+					ethers.encodeBytes32String('GIMS'),
 					betAmount
 				);
 
-			const bet = (
-				await chartsBet.getBetsInCountry(
-					ethers.encodeBytes32String('FR')
-				)
-			)[0];
-			expect(bet.odds).to.equal(130); // GIMS odds
+			const bets = await chartsBet.getBetsInCountry(
+				ethers.encodeBytes32String('FR')
+			);
+			expect(bets[0].odds).to.equal(130n);
 		});
 
 		it('Should revert if trying to bet on a non-existent artist', async function () {
@@ -314,7 +337,7 @@ describe('ChartsBet Contract', function () {
 					.connect(addr1)
 					.placeBet(
 						ethers.encodeBytes32String('FR'),
-						'NonExistentArtist',
+						ethers.encodeBytes32String('NonExistentArtist'),
 						{ value: ethers.parseEther('0.1') }
 					)
 			).to.be.revertedWithCustomError(
@@ -369,7 +392,13 @@ describe('ChartsBet Contract', function () {
 	describe('Getter Functions', function () {
 		beforeEach(async function () {
 			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
-			const topArtists = ['GIMS', 'Carbonne', 'Leto', 'Lacrim', 'Dadi'];
+			const topArtists = [
+				ethers.encodeBytes32String('GIMS'),
+				ethers.encodeBytes32String('Carbonne'),
+				ethers.encodeBytes32String('Leto'),
+				ethers.encodeBytes32String('Lacrim'),
+				ethers.encodeBytes32String('Dadi'),
+			];
 			const tx = await chartsOracle.requestLeaderboardData(
 				ethers.encodeBytes32String('FR')
 			);
@@ -392,9 +421,9 @@ describe('ChartsBet Contract', function () {
 		it('Should return correct artist odds', async function () {
 			const odds = await chartsBet.getArtistOdds(
 				ethers.encodeBytes32String('FR'),
-				'GIMS'
+				ethers.encodeBytes32String('GIMS')
 			);
-			expect(odds).to.be.gt(0);
+			expect(odds).to.equal(120n);
 		});
 
 		it('Should return correct total bets on artist', async function () {
