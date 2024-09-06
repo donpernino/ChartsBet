@@ -26,7 +26,7 @@ contract ChartsOracle is
     event DailyWinnerFulfilled(
         bytes32 indexed requestId,
         bytes32 indexed country,
-        string winningArtist
+        bytes32 winningArtist
     );
 
     mapping(bytes32 => bool) private pendingRequests;
@@ -73,7 +73,7 @@ contract ChartsOracle is
     function fulfillLeaderboardData(
         bytes32 requestId,
         bytes32 country,
-        string[] memory topArtists
+        bytes32[] memory topArtists
     ) public onlyOwner whenNotPaused {
         require(pendingRequests[requestId], "Request not pending");
         delete pendingRequests[requestId];
@@ -85,7 +85,7 @@ contract ChartsOracle is
     function fulfillDailyWinner(
         bytes32 requestId,
         bytes32 country,
-        string memory winningArtist
+        bytes32 winningArtist
     ) public onlyOwner whenNotPaused {
         require(pendingRequests[requestId], "Request not pending");
         delete pendingRequests[requestId];
@@ -114,11 +114,11 @@ contract ChartsOracle is
 interface IChartsBet {
     function fulfillTopArtists(
         bytes32 country,
-        string[] memory topArtists
+        bytes32[] memory topArtists
     ) external;
 
     function fulfillDailyWinner(
         bytes32 country,
-        string memory winningArtist
+        bytes32 winningArtist
     ) external;
 }

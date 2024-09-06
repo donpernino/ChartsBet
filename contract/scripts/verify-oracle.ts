@@ -1,8 +1,8 @@
 import { ethers } from 'hardhat';
 
 async function main() {
-	const chartsBetAddress = '0xfC452e21690ddfb842c95Eb55C9004b46E909D35'; // New ChartsBet address
-	const chartsOracleAddress = '0x939F96BFC5BC9BeA71cc047209458dD50D01DF1F'; // New ChartsOracle address
+	const chartsBetAddress = '0x1cf082e63a9127dF98EC74c8145c55034967Ff6D'; // New ChartsBet address
+	const chartsOracleAddress = '0x5dcABaE052024C0d901F3e0Badb7d6049810Aeb0'; // New ChartsOracle address
 	console.log('ChartsBet address:', chartsBetAddress);
 	console.log('ChartsOracle address:', chartsOracleAddress);
 

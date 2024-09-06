@@ -1,11 +1,11 @@
 import { ethers } from 'hardhat';
 
 async function requestAndCheckLeaderboard() {
-	const chartsOracleAddress = '0x939F96BFC5BC9BeA71cc047209458dD50D01DF1F';
+	const chartsOracleAddress = '0x5dcABaE052024C0d901F3e0Badb7d6049810Aeb0';
 	const ChartsOracle = await ethers.getContractFactory('ChartsOracle');
 	const chartsOracle = ChartsOracle.attach(chartsOracleAddress);
 
-	const chartsBetAddress = '0xfC452e21690ddfb842c95Eb55C9004b46E909D35';
+	const chartsBetAddress = '0x1cf082e63a9127dF98EC74c8145c55034967Ff6D';
 	const ChartsBet = await ethers.getContractFactory('ChartsBet');
 	const chartsBet = ChartsBet.attach(chartsBetAddress);
 

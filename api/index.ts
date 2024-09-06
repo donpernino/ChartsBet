@@ -149,10 +149,12 @@ app.get('/leaderboard/:country', (req: Request, res: Response) => {
 	const compact = req.query.compact === 'true';
 
 	if (compact) {
-		const compactLeaderboard = leaderboard[country]?.map((track) => ({
-			artist: track.artist,
-			odds: track.odds,
-		}));
+		let compactLeaderboard = [];
+
+		leaderboard[country]?.map((track) =>
+			compactLeaderboard.push(track.artist)
+		);
+
 		res.json(compactLeaderboard);
 	} else {
 		res.json({

@@ -57,7 +57,7 @@ contract ChartsBet is
     event OracleUpdated(address newOracle);
     event WithdrawalRequested(uint256 requestTime);
     event WithdrawalExecuted(uint256 amount);
-    event ArtistOddsSet(bytes32 indexed country, string artist, uint256 odds);
+    event ArtistOddsSet(bytes32 indexed country, bytes32 artist, uint256 odds);
 
     function initialize(address _owner, address _oracle) public initializer {
         __Ownable_init(_owner);
@@ -159,7 +159,7 @@ contract ChartsBet is
 
     function fulfillTopArtists(
         bytes32 country,
-        string[] memory topArtists
+        bytes32[] memory topArtists
     ) public whenNotPaused {
         if (msg.sender != address(oracle)) revert OnlyOracleAllowed();
 
@@ -269,7 +269,7 @@ contract ChartsBet is
 
     function assignRanksAndOdds(
         bytes32 country,
-        string[] memory topArtists
+        bytes32[] memory topArtists
     ) internal {
         Leaderboard storage lb = leaderboards[country];
         mapping(bytes32 => uint256) storage artistAppearances = lb.artistRank;

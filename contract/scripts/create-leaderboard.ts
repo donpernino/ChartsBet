@@ -1,7 +1,7 @@
 import { ethers } from 'hardhat';
 
 async function createLeaderboard() {
-	const chartsBetAddress = '0xfC452e21690ddfb842c95Eb55C9004b46E909D35'; // Replace with actual address
+	const chartsBetAddress = '0x1cf082e63a9127dF98EC74c8145c55034967Ff6D'; // Replace with actual address
 	const ChartsBet = await ethers.getContractFactory('ChartsBet');
 	const chartsBet = ChartsBet.attach(chartsBetAddress);
 
@@ -11,14 +11,19 @@ async function createLeaderboard() {
 
 	console.log('Using account:', signer.address);
 
-	const country = 'WW';
+	const country = 'IT';
 	const countryBytes = ethers.encodeBytes32String(country);
 
 	try {
-		const tx = await chartsBet.createLeaderboard(countryBytes);
-		console.log('Transaction sent. Hash:', tx.hash);
-		await tx.wait();
-		console.log('Leaderboard created successfully for WW');
+		const tx1 = await chartsBet.createLeaderboard(countryBytes);
+		console.log('Transaction 1 sent. Hash:', tx1.hash);
+		await tx1.wait();
+		console.log('Leaderboard created successfully for IT');
+
+		const tx2 = await chartsBet.closeLeaderboard(countryBytes);
+		console.log('Transaction 2 sent. Hash:', tx2.hash);
+		await tx2.wait();
+		console.log('Leaderboard closed successfully for IT');
 	} catch (error) {
 		console.error('Error creating leaderboard:', error.message);
 	}

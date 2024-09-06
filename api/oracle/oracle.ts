@@ -48,36 +48,41 @@ contract.on('*', (event) => {
 	console.log('Event received:', event);
 });
 
-contract.on('LeaderboardCreated', async (country: string) => {
+contract.on('LeaderboardCreated', async (countryBytes32: string) => {
+	const country = ethers.decodeBytes32String(countryBytes32);
+
 	console.log(
 		`[${new Date().toISOString()}] LeaderboardCreated event received for ${country}`
 	);
 
-	try {
-		console.log(`Fetching leaderboard data for ${country}...`);
-		const response = await fetch(
-			`http://localhost:8080/leaderboard/${country}?compact=true`
-		);
-		if (!response.ok) {
-			throw new Error(`HTTP error! status: ${response.status}`);
-		}
-		const topArtists = await response.json();
-		console.log(`Fetched top artists for ${country}:`, topArtists);
-
-		console.log(`Calling fulfillTopArtists for ${country}...`);
-		const tx = await contract.fulfillTopArtists(country, topArtists);
-		console.log(`Transaction sent. Hash: ${tx.hash}`);
-		const receipt = await tx.wait();
-		console.log(`Transaction mined in block ${receipt.blockNumber}`);
-		console.log(
-			`[${new Date().toISOString()}] Top artists for ${country} updated on-chain`
-		);
-	} catch (error) {
-		console.error(
-			`[${new Date().toISOString()}] Failed to update top artists for ${country}:`,
-			error
-		);
+	console.log(`Fetching leaderboard data for ${country}...`);
+	const response = await fetch(
+		`http://localhost:8080/leaderboard/${country}?compact=true`
+	);
+	console.log('response', response);
+	if (!response.ok) {
+		throw new Error(`HTTP error! status: ${response.status}`);
 	}
+	const topArtists = await response.json();
+
+	const topArtistsBytes32 = [];
+
+	topArtists.forEach((artist: string) => {
+		topArtistsBytes32.push(ethers.encodeBytes32String(artist));
+	});
+
+	console.log({ topArtistsBytes32 });
+
+	const tx = await contract.fulfillTopArtists(
+		countryBytes32,
+		topArtistsBytes32
+	);
+	console.log(`Transaction sent. Hash: ${tx.hash}`);
+	const receipt = await tx.wait();
+	console.log(`Transaction mined in block ${receipt.blockNumber}`);
+	console.log(
+		`[${new Date().toISOString()}] Top artists for ${country} updated on-chain`
+	);
 });
 
 // Global error handling

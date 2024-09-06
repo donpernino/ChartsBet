@@ -1,7 +1,7 @@
 import { ethers } from 'hardhat';
 
 async function main() {
-	const chartsBetAddress = '0xfC452e21690ddfb842c95Eb55C9004b46E909D35';
+	const chartsBetAddress = '0x1cf082e63a9127dF98EC74c8145c55034967Ff6D';
 	const ChartsBet = await ethers.getContractFactory('ChartsBet');
 	const chartsBet = ChartsBet.attach(chartsBetAddress);
 
