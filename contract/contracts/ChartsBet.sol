@@ -59,6 +59,15 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         uint256 openingTime,
         uint256 closingTime
     );
+    event Debug(
+        string message,
+        bytes32 country,
+        uint256 day,
+        address bettor,
+        uint256 amount,
+        bool poolClosed,
+        bytes32 winningArtist
+    );
 
     error InvalidCountry();
     error PoolNotOpen();
@@ -69,9 +78,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     error PoolNotReadyToClose();
     error InvalidArtistCount();
 
-    constructor(address initialOwner) Ownable(initialOwner) {
-        _transferOwnership(msg.sender);
-    }
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     function initialize() public initializer {
         bytes32[8] memory countries = [
@@ -139,6 +146,15 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         pool.totalBets++;
         pool.totalAmount += msg.value;
 
+        emit Debug(
+            "Bet placed",
+            country,
+            currentDay,
+            msg.sender,
+            msg.value,
+            pool.closed,
+            pool.winningArtist
+        );
         emit BetPlaced(
             msg.sender,
             country,
@@ -166,13 +182,65 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
 
     function settleBet(bytes32 country, uint256 day) external nonReentrant {
         DailyBettingPool storage pool = dailyPools[country][day];
+
+        emit Debug(
+            "Settling bet - Pool state",
+            country,
+            day,
+            msg.sender,
+            pool.totalBets,
+            pool.closed,
+            pool.winningArtist
+        );
+        emit Debug(
+            "Settling bet - Pool times",
+            country,
+            day,
+            msg.sender,
+            pool.openingTime,
+            pool.closingTime == 0 ? false : true,
+            bytes32(0)
+        );
+
         if (!pool.closed) revert PoolNotOpen();
 
         Bet storage bet = pool.bets[msg.sender];
-        if (bet.amount == 0) revert NoBetPlaced();
+
+        emit Debug(
+            "Settling bet - Bet details",
+            country,
+            day,
+            msg.sender,
+            bet.amount,
+            false,
+            bet.artist
+        );
+
+        if (bet.amount == 0) {
+            emit Debug(
+                "No bet found",
+                country,
+                day,
+                msg.sender,
+                0,
+                pool.closed,
+                pool.winningArtist
+            );
+            revert NoBetPlaced();
+        }
 
         bool won = bet.artist == pool.winningArtist;
         uint256 payout = won ? (bet.amount * bet.odds) / 100 : 0;
+
+        emit Debug(
+            "Bet settled",
+            country,
+            day,
+            msg.sender,
+            payout,
+            pool.closed,
+            pool.winningArtist
+        );
 
         if (payout > 0) {
             payable(msg.sender).transfer(payout);

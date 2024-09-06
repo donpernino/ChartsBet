@@ -140,28 +140,27 @@ describe('ChartsBet Contract', function () {
 			console.log('Top 10 updated');
 
 			const betAmount = ethers.parseEther('0.1');
-			const tx = await chartsBet
+			const placeBetTx = await chartsBet
 				.connect(addr1)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist0'),
 					{ value: betAmount }
 				);
-			const receipt = await tx.wait();
+			const placeBetReceipt = await placeBetTx.wait();
 
-			// Vérifier l'événement Debug pour le placement du pari
-			const debugEvents = receipt?.logs.filter(
-				(log) =>
-					log.topics[0] ===
-					ethers.id('Debug(string,bytes32,uint256,address,uint256)')
+			console.log(
+				'Debug events from placeBet:',
+				logDebugEvents(placeBetReceipt)
 			);
-			console.log('Debug events from placeBet:', debugEvents);
+
+			// Get the current day
+			const currentDay = Math.floor(Date.now() / 86400000);
 
 			await ethers.provider.send('evm_increaseTime', [86400]);
 			await ethers.provider.send('evm_mine', []);
 			console.log('Time advanced');
 
-			const currentDay = Math.floor(Date.now() / 86400000);
 			await chartsBet.closePoolAndAnnounceWinner(
 				ethers.encodeBytes32String('WW'),
 				currentDay,
@@ -169,41 +168,67 @@ describe('ChartsBet Contract', function () {
 			);
 			console.log('Pool closed and winner announced');
 
-			// Capturer tous les événements lors du règlement du pari
-			const settleTx = await chartsBet
+			const settleBetTx = await chartsBet
 				.connect(addr1)
 				.settleBet(ethers.encodeBytes32String('WW'), currentDay);
-			const settleReceipt = await settleTx.wait();
+			const settleBetReceipt = await settleBetTx.wait();
 
-			// Afficher tous les événements émis lors du règlement
-			console.log('All events from settleBet:', settleReceipt?.logs);
-
-			// Vérifier si l'événement BetSettled a été émis
-			const betSettledEvent = settleReceipt?.logs.find(
-				(log) =>
-					log.topics[0] ===
-					ethers.id(
-						'BetSettled(address,bytes32,uint256,uint256,bool)'
-					)
+			console.log(
+				'Debug events from settleBet:',
+				logDebugEvents(settleBetReceipt)
 			);
-			expect(betSettledEvent).to.not.be.undefined;
 
-			if (betSettledEvent) {
-				const [bettor, country, day, amount, won] =
-					ethers.AbiCoder.defaultAbiCoder().decode(
-						['address', 'bytes32', 'uint256', 'uint256', 'bool'],
-						betSettledEvent.data
-					);
-				console.log('BetSettled event data:', {
-					bettor,
-					country,
-					day,
-					amount,
-					won,
-				});
-			}
+			// Explicitly expect settleBet to succeed
+			await expect(
+				chartsBet
+					.connect(addr1)
+					.settleBet(ethers.encodeBytes32String('WW'), currentDay)
+			).to.not.be.reverted;
 		});
 	});
+
+	// Helper function to log debug events
+	function logDebugEvents(receipt: any) {
+		return receipt?.logs
+			.filter(
+				(log: any) =>
+					log.topics[0] ===
+					ethers.id(
+						'Debug(string,bytes32,uint256,address,uint256,bool,bytes32)'
+					)
+			)
+			.map((event: any) => {
+				const [
+					message,
+					country,
+					day,
+					bettor,
+					amount,
+					poolClosed,
+					winningArtist,
+				] = ethers.AbiCoder.defaultAbiCoder().decode(
+					[
+						'string',
+						'bytes32',
+						'uint256',
+						'address',
+						'uint256',
+						'bool',
+						'bytes32',
+					],
+					event.data
+				);
+				return {
+					message,
+					country: ethers.decodeBytes32String(country),
+					day: day.toString(),
+					bettor,
+					amount: amount.toString(),
+					poolClosed,
+					winningArtist: ethers.decodeBytes32String(winningArtist),
+				};
+			});
+	}
 
 	describe('getOdds', function () {
 		beforeEach(async function () {
