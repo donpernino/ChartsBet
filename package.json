@@ -10,7 +10,9 @@
 	"main": "index.js",
 	"scripts": {
 		"compile-contracts": "cd contract && npx hardhat compile",
-		"start-api": "cd api && npx ts-node index.ts",
+		"start-server": "cd api && npx ts-node index.ts",
+		"start-oracle": "cd api && npx ts-node ./oracle/oracle.ts",
+		"start-api": "cd api && npx ts-node start.ts",
 		"start-dapp": "cd dapp && npm run dev",
 		"start": "concurrently \"npm run start-api\" \"npm run start-dapp\""
 	},

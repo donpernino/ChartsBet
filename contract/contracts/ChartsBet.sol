@@ -65,7 +65,7 @@ contract ChartsBet is
         __ReentrancyGuard_init();
 
         oracle = ChartsOracle(_oracle);
-        bytes32[8] memory countries = [
+        bytes32[9] memory countries = [
             bytes32("WW"),
             bytes32("BR"),
             bytes32("DE"),
@@ -73,7 +73,8 @@ contract ChartsBet is
             bytes32("FR"),
             bytes32("IT"),
             bytes32("PT"),
-            bytes32("US")
+            bytes32("US"),
+            bytes32("TEST")
         ];
         for (uint i = 0; i < countries.length; i++) {
             validCountries[countries[i]] = true;
@@ -305,6 +306,10 @@ contract ChartsBet is
         uint256 effectiveRank = (rank + (rank + appearances - 1)) / 2;
         odds = 120 + (effectiveRank - 1) * 20;
         return odds;
+    }
+
+    function testOracleConnection() public onlyOwner {
+        emit LeaderboardCreated(bytes32("TEST"));
     }
 
     // Add a gap for future variable additions without affecting storage layout
