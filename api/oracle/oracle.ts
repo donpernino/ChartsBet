@@ -1,8 +1,9 @@
 import { ethers } from 'ethers';
-import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import cron from 'node-cron';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -43,63 +44,75 @@ console.log(
 	`Oracle started. Listening for events on contract: ${CONTRACT_ADDRESS}`
 );
 
-// Log all events
-contract.on('*', (event) => {
-	console.log('Event received:', event);
-});
+const countries = ['WW', 'BR', 'DE', 'ES', 'FR', 'IT', 'PT', 'US'];
 
-contract.on('LeaderboardCreated', async (countryBytes32: string) => {
-	const country = ethers.decodeBytes32String(countryBytes32);
+// Function to convert string to bytes32
+function stringToBytes32(str) {
+	return ethers.encodeBytes32String(str);
+}
 
-	console.log(
-		`[${new Date().toISOString()}] LeaderboardCreated event received for ${country}`
-	);
+// Function to open all pools
+async function openPoolsAndUpdateTop10() {
+	try {
+		// Open all pools
+		const openTx = await contract.openAllDailyPools();
+		await openTx.wait();
+		console.log('All pools have been opened for the day');
 
-	console.log(`Fetching leaderboard data for ${country}...`);
-	const response = await fetch(
-		`http://localhost:8080/leaderboard/${country}?compact=true`
-	);
-	console.log('response', response);
-	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
+		// Update top 10 for each country
+		for (const country of countries) {
+			await updateTop10(country);
+		}
+	} catch (error) {
+		console.error('Error in daily pool opening and top 10 update:', error);
 	}
-	const topArtists = await response.json();
+}
 
-	const topArtistsBytes32 = [];
+// Function to update top 10 artists
+async function updateTop10(country) {
+	try {
+		const response = await axios.get(
+			`http://localhost:8080/leaderboard/${country}?compact=true`
+		);
+		const top10 = response.data.slice(0, 10).map(stringToBytes32);
+		const tx = await contract.updateTop10(stringToBytes32(country), top10);
+		await tx.wait();
+		console.log(`Top 10 updated for ${country}`);
+	} catch (error) {
+		console.error(`Error updating top 10 for ${country}:`, error);
+	}
+}
 
-	topArtists.forEach((artist: string) => {
-		topArtistsBytes32.push(ethers.encodeBytes32String(artist));
-	});
+// Function to close pool and announce winner
+async function closePoolAndAnnounceWinner(country) {
+	try {
+		const response = await axios.get(
+			`http://localhost:8080/daily-winner/${country}`
+		);
+		const winner = stringToBytes32(response.data);
+		const currentDay = Math.floor(Date.now() / 86400000); // Current day
+		const tx = await contract.closePoolAndAnnounceWinner(
+			stringToBytes32(country),
+			currentDay,
+			winner
+		);
+		await tx.wait();
+		console.log(`Pool closed and winner announced for ${country}`);
+	} catch (error) {
+		console.error(`Error closing pool for ${country}:`, error);
+	}
+}
 
-	console.log({ topArtistsBytes32 });
+// Task scheduling
 
-	const tx = await contract.fulfillTopArtists(
-		countryBytes32,
-		topArtistsBytes32
-	);
-	console.log(`Transaction sent. Hash: ${tx.hash}`);
-	const receipt = await tx.wait();
-	console.log(`Transaction mined in block ${receipt.blockNumber}`);
-	console.log(
-		`[${new Date().toISOString()}] Top artists for ${country} updated on-chain`
-	);
+// Open pools and update top 10 every day at midnight
+cron.schedule('0 0 * * *', () => {
+	openPoolsAndUpdateTop10();
 });
 
-contract.on('RequestDailyWinner', async (countryBytes32: string) => {
-	// fetch daily winner and send it to oracle
-	return 'test';
+// Close pools and announce winners every day at 23:59
+cron.schedule('59 23 * * *', () => {
+	countries.forEach((country) => closePoolAndAnnounceWinner(country));
 });
 
-// Global error handling
-process.on('unhandledRejection', (error: Error) => {
-	console.error(
-		`[${new Date().toISOString()}] Unhandled promise rejection:`,
-		error
-	);
-});
-
-// Keep the script running
-process.on('SIGINT', () => {
-	console.log('Oracle stopped');
-	process.exit();
-});
+console.log('Oracle started, waiting for scheduled executions...');

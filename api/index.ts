@@ -92,24 +92,12 @@ const fetchLeaderboard = async (country: Country) => {
 				odds,
 			};
 		});
+
+		console.log(`Fetched leaderboard for ${country}`);
 	} catch (error) {
 		console.error(`Error fetching leaderboard for ${country}:`, error);
 	}
 };
-
-app.post(
-	'/update-leaderboard/:country',
-	async (req: Request, res: Response) => {
-		const country = req.params.country.toUpperCase() as Country;
-		if (!playlistIds[country]) {
-			return res
-				.status(400)
-				.json({ error: `Invalid country code: ${country}` });
-		}
-		await fetchLeaderboard(country);
-		res.json({ message: `Leaderboard updated for ${country}` });
-	}
-);
 
 app.get('/daily-winner/:country', (req: Request, res: Response) => {
 	const country = req.params.country.toUpperCase() as Country;

@@ -1,11 +1,10 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
-import { ChartsBet, ChartsOracle } from '../typechain-types';
+import { ChartsBet } from '../typechain-types';
 import { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers';
 
 describe('ChartsBet Contract', function () {
 	let chartsBet: ChartsBet;
-	let chartsOracle: ChartsOracle;
 	let owner: HardhatEthersSigner;
 	let addr1: HardhatEthersSigner;
 	let addr2: HardhatEthersSigner;
@@ -13,464 +12,293 @@ describe('ChartsBet Contract', function () {
 	beforeEach(async function () {
 		[owner, addr1, addr2] = await ethers.getSigners();
 
-		const ChartsOracleFactory = await ethers.getContractFactory(
-			'ChartsOracle'
-		);
-		chartsOracle = await ChartsOracleFactory.deploy();
-
 		const ChartsBetFactory = await ethers.getContractFactory('ChartsBet');
-		chartsBet = await ChartsBetFactory.deploy();
+		chartsBet = await ChartsBetFactory.deploy(await owner.getAddress());
+		await chartsBet.waitForDeployment();
 
-		await chartsBet.initialize(
-			await owner.getAddress(),
-			await chartsOracle.getAddress()
-		);
-		await chartsOracle.initialize(
-			await owner.getAddress(),
-			await chartsBet.getAddress()
-		);
+		await chartsBet.initialize();
 	});
 
-	describe('Deployment', function () {
-		it('Should set the correct owner and oracle contract', async function () {
-			expect(await chartsBet.owner()).to.equal(await owner.getAddress());
-			expect(await chartsBet.oracle()).to.equal(
-				await chartsOracle.getAddress()
-			);
+	describe('initialize', function () {
+		it('Should set valid countries', async function () {
+			const countries = ['WW', 'BR', 'DE', 'ES', 'FR', 'IT', 'PT', 'US'];
+			for (const country of countries) {
+				expect(
+					await chartsBet.validCountries(
+						ethers.encodeBytes32String(country)
+					)
+				).to.be.true;
+			}
 		});
 	});
 
-	describe('Creating Leaderboards', function () {
-		it('Should allow the owner to create a new leaderboard', async function () {
-			await expect(
-				chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'))
-			)
-				.to.emit(chartsBet, 'LeaderboardCreated')
-				.withArgs(ethers.encodeBytes32String('FR'));
+	describe('openAllDailyPools', function () {
+		it('Should open pools for all countries', async function () {
+			await expect(chartsBet.openAllDailyPools())
+				.to.emit(chartsBet, 'PoolOpened')
+				.withArgs(
+					ethers.encodeBytes32String('WW'),
+					(day: any) => typeof day === 'bigint',
+					(openingTime: any) => typeof openingTime === 'bigint',
+					(closingTime: any) => typeof closingTime === 'bigint'
+				);
 		});
 
-		it('Should revert if non-owner tries to create a leaderboard', async function () {
+		it('Should revert if non-owner tries to open pools', async function () {
 			await expect(
-				chartsBet
-					.connect(addr1)
-					.createLeaderboard(ethers.encodeBytes32String('FR'))
+				chartsBet.connect(addr1).openAllDailyPools()
 			).to.be.revertedWithCustomError(
 				chartsBet,
 				'OwnableUnauthorizedAccount'
 			);
 		});
-
-		it('Should revert if an invalid country code is provided', async function () {
-			await expect(
-				chartsBet.createLeaderboard(ethers.encodeBytes32String('XX'))
-			).to.be.revertedWithCustomError(chartsBet, 'InvalidCountryCode');
-		});
-
-		it('Should revert if trying to create a leaderboard for an active country', async function () {
-			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
-			await expect(
-				chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'))
-			).to.be.revertedWithCustomError(
-				chartsBet,
-				'LeaderboardStillActive'
-			);
-		});
 	});
 
-	describe('Fulfilling Top Artists', function () {
+	describe('placeBet', function () {
 		beforeEach(async function () {
-			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
-		});
-
-		it('Should allow the oracle to fulfill top artists with correct odds calculation', async function () {
-			const topArtists = [
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-				ethers.encodeBytes32String('Leto'),
-				ethers.encodeBytes32String('Lacrim'),
-				ethers.encodeBytes32String('Dadi'),
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-			];
-
-			const tx = await chartsOracle.requestLeaderboardData(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt = (await tx.wait()) as any;
-			const requestId = receipt.logs[0].topics[1];
-
-			await expect(
-				chartsOracle.fulfillLeaderboardData(
-					requestId,
-					ethers.encodeBytes32String('FR'),
-					topArtists
-				)
-			)
-				.to.emit(chartsBet, 'TopArtistsFulfilled')
-				.withArgs(ethers.encodeBytes32String('FR'));
-
-			// Check odds for GIMS (rank 1, 2 appearances)
-			const gimsOdds = await chartsBet.getArtistOdds(
-				ethers.encodeBytes32String('FR'),
-				ethers.encodeBytes32String('GIMS')
-			);
-			expect(gimsOdds).to.equal(130n);
-
-			// Check odds for Carbonne (rank 2, 2 appearances)
-			const carbonneOdds = await chartsBet.getArtistOdds(
-				ethers.encodeBytes32String('FR'),
-				ethers.encodeBytes32String('Carbonne')
-			);
-			expect(carbonneOdds).to.equal(150n);
-
-			// Check odds for Leto (rank 3, 1 appearance)
-			const letoOdds = await chartsBet.getArtistOdds(
-				ethers.encodeBytes32String('FR'),
-				ethers.encodeBytes32String('Leto')
-			);
-			expect(letoOdds).to.equal(160n);
-		});
-
-		it('Should revert if non-oracle tries to fulfill top artists', async function () {
-			const topArtists = [
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-				ethers.encodeBytes32String('Leto'),
-				ethers.encodeBytes32String('Lacrim'),
-				ethers.encodeBytes32String('Dadi'),
-			];
-			await expect(
-				chartsBet.fulfillTopArtists(
-					ethers.encodeBytes32String('FR'),
-					topArtists
-				)
-			).to.be.revertedWithCustomError(chartsBet, 'OnlyOracleAllowed');
-		});
-	});
-
-	describe('Fulfilling Daily Winner', function () {
-		beforeEach(async function () {
-			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
-			const topArtists = [
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-				ethers.encodeBytes32String('Leto'),
-				ethers.encodeBytes32String('Lacrim'),
-				ethers.encodeBytes32String('Dadi'),
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-			];
-			const tx = await chartsOracle.requestLeaderboardData(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt = (await tx.wait()) as any;
-			const requestId = receipt.logs[0].topics[1];
-			await chartsOracle.fulfillLeaderboardData(
-				requestId,
-				ethers.encodeBytes32String('FR'),
-				topArtists
-			);
-
-			// Place bets
-			await chartsBet
-				.connect(addr1)
-				.placeBet(
-					ethers.encodeBytes32String('FR'),
-					ethers.encodeBytes32String('GIMS'),
-					{
-						value: ethers.parseEther('0.1'),
-					}
-				);
-			await chartsBet
-				.connect(addr2)
-				.placeBet(
-					ethers.encodeBytes32String('FR'),
-					ethers.encodeBytes32String('Carbonne'),
-					{
-						value: ethers.parseEther('0.1'),
-					}
-				);
-		});
-
-		it('Should correctly distribute winnings based on new odds calculation', async function () {
-			const initialBalance1 = await ethers.provider.getBalance(
-				addr1.address
-			);
-			const initialBalance2 = await ethers.provider.getBalance(
-				addr2.address
-			);
-
-			const tx = await chartsOracle.requestDailyWinner(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt = (await tx.wait()) as any;
-			const requestId = receipt.logs[0].topics[1];
-
-			await chartsOracle.fulfillDailyWinner(
-				requestId,
-				ethers.encodeBytes32String('FR'),
-				ethers.encodeBytes32String('GIMS')
-			);
-
-			const finalBalance1 = await ethers.provider.getBalance(
-				addr1.address
-			);
-			const finalBalance2 = await ethers.provider.getBalance(
-				addr2.address
-			);
-
-			// GIMS odds are 130, so winnings should be 0.1 * 130 / 100 = 0.13 ETH
-			const expectedWinnings = ethers.parseEther('0.13');
-			const actualWinnings = finalBalance1 - initialBalance1;
-
-			expect(actualWinnings).to.be.closeTo(
-				expectedWinnings,
-				ethers.parseEther('0.01') // Allow for some gas cost variation
-			);
-
-			// Carbonne (addr2) should not have won anything
-			expect(finalBalance2).to.equal(initialBalance2);
-		});
-
-		it('Should allow the oracle to fulfill daily winner', async function () {
-			const tx = await chartsOracle.requestDailyWinner(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt = (await tx.wait()) as any;
-			const requestId = receipt.logs[0].topics[1];
-
-			await expect(
-				chartsOracle.fulfillDailyWinner(
-					requestId,
-					ethers.encodeBytes32String('FR'),
-					ethers.encodeBytes32String('GIMS')
-				)
-			)
-				.to.emit(chartsBet, 'DailyWinnerFulfilled')
-				.withArgs(
-					ethers.encodeBytes32String('FR'),
-					ethers.encodeBytes32String('GIMS')
-				);
-		});
-
-		it('Should revert if trying to fulfill daily winner for a closed leaderboard', async function () {
-			const tx1 = await chartsOracle.requestDailyWinner(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt1 = (await tx1.wait()) as any;
-			const requestId1 = receipt1.logs[0].topics[1];
-			await chartsOracle.fulfillDailyWinner(
-				requestId1,
-				ethers.encodeBytes32String('FR'),
-				ethers.encodeBytes32String('GIMS')
-			);
-
-			const tx2 = await chartsOracle.requestDailyWinner(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt2 = (await tx2.wait()) as any;
-			const requestId2 = receipt2.logs[0].topics[1];
-			await expect(
-				chartsOracle.fulfillDailyWinner(
-					requestId2,
-					ethers.encodeBytes32String('FR'),
-					ethers.encodeBytes32String('Carbonne')
-				)
-			).to.be.revertedWithCustomError(chartsBet, 'BettingClosed');
-		});
-	});
-
-	describe('Placing Bets', function () {
-		beforeEach(async function () {
-			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
-			const topArtists = [
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-				ethers.encodeBytes32String('Leto'),
-				ethers.encodeBytes32String('Lacrim'),
-				ethers.encodeBytes32String('Dadi'),
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-			];
-			const tx = await chartsOracle.requestLeaderboardData(
-				ethers.encodeBytes32String('FR')
-			);
-			const receipt = (await tx.wait()) as any;
-			const requestId = receipt.logs[0].topics[1];
-			await chartsOracle.fulfillLeaderboardData(
-				requestId,
-				ethers.encodeBytes32String('FR'),
-				topArtists
+			await chartsBet.openAllDailyPools();
+			await chartsBet.updateTop10(
+				ethers.encodeBytes32String('WW'),
+				Array(10).fill(ethers.encodeBytes32String('Artist'))
 			);
 		});
 
-		it('Should allow users to place bets with correct odds', async function () {
+		it('Should allow placing a bet', async function () {
 			const betAmount = ethers.parseEther('0.1');
 			await expect(
 				chartsBet
 					.connect(addr1)
 					.placeBet(
-						ethers.encodeBytes32String('FR'),
-						ethers.encodeBytes32String('GIMS'),
-						{
-							value: betAmount,
-						}
+						ethers.encodeBytes32String('WW'),
+						ethers.encodeBytes32String('Artist'),
+						{ value: betAmount }
 					)
 			)
 				.to.emit(chartsBet, 'BetPlaced')
 				.withArgs(
 					await addr1.getAddress(),
-					ethers.encodeBytes32String('FR'),
-					ethers.encodeBytes32String('GIMS'),
-					betAmount
+					ethers.encodeBytes32String('WW'),
+					(day: any) => typeof day === 'bigint',
+					ethers.encodeBytes32String('Artist'),
+					betAmount,
+					(odds: any) => typeof odds === 'bigint'
 				);
-
-			const bets = await chartsBet.getBetsInCountry(
-				ethers.encodeBytes32String('FR')
-			);
-			expect(bets[0].odds).to.equal(130n);
 		});
 
-		it('Should revert if trying to bet on a non-existent artist', async function () {
+		it('Should revert if bet is too high', async function () {
+			const betAmount = ethers.parseEther('2');
 			await expect(
 				chartsBet
 					.connect(addr1)
 					.placeBet(
-						ethers.encodeBytes32String('FR'),
-						ethers.encodeBytes32String('NonExistentArtist'),
-						{ value: ethers.parseEther('0.1') }
+						ethers.encodeBytes32String('WW'),
+						ethers.encodeBytes32String('Artist'),
+						{ value: betAmount }
 					)
-			).to.be.revertedWithCustomError(
-				chartsBet,
-				'ArtistNotInLeaderboard'
-			);
+			).to.be.revertedWithCustomError(chartsBet, 'BetTooHigh');
 		});
 	});
 
-	describe('Withdrawals', function () {
-		it('Should allow the owner to request a withdrawal', async function () {
-			await expect(chartsBet.requestWithdrawal()).to.emit(
-				chartsBet,
-				'WithdrawalRequested'
-			);
+	describe('closePoolAndAnnounceWinner', function () {
+		beforeEach(async function () {
+			await chartsBet.openAllDailyPools();
 		});
 
-		it('Should not allow non-owners to request a withdrawal', async function () {
-			await expect(
-				chartsBet.connect(addr1).requestWithdrawal()
-			).to.be.revertedWithCustomError(
-				chartsBet,
-				'OwnableUnauthorizedAccount'
-			);
-		});
+		it('Should close pool and announce winner', async function () {
+			await ethers.provider.send('evm_increaseTime', [86400]);
+			await ethers.provider.send('evm_mine', []);
 
-		it('Should not allow withdrawal execution before delay', async function () {
-			await chartsBet.requestWithdrawal();
+			const currentDay = Math.floor(Date.now() / 86400000);
 			await expect(
-				chartsBet.executeWithdrawal()
-			).to.be.revertedWithCustomError(chartsBet, 'WithdrawalDelayNotMet');
+				chartsBet.closePoolAndAnnounceWinner(
+					ethers.encodeBytes32String('WW'),
+					currentDay,
+					ethers.encodeBytes32String('Winner')
+				)
+			)
+				.to.emit(chartsBet, 'PoolClosed')
+				.withArgs(
+					ethers.encodeBytes32String('WW'),
+					currentDay,
+					ethers.encodeBytes32String('Winner')
+				);
 		});
 	});
 
-	describe('Pausing and Unpausing', function () {
-		it('Should allow the owner to pause and unpause the contract', async function () {
-			await chartsBet.toggleContractActive();
+	describe('settleBet', function () {
+		it('Should settle bet correctly', async function () {
+			await chartsBet.openAllDailyPools();
+			console.log('Pools opened');
+
+			const artists = Array(10)
+				.fill(0)
+				.map((_, i) => ethers.encodeBytes32String(`Artist${i}`));
+			await chartsBet.updateTop10(
+				ethers.encodeBytes32String('WW'),
+				artists
+			);
+			console.log('Top 10 updated');
+
+			const betAmount = ethers.parseEther('0.1');
+			const tx = await chartsBet
+				.connect(addr1)
+				.placeBet(
+					ethers.encodeBytes32String('WW'),
+					ethers.encodeBytes32String('Artist0'),
+					{ value: betAmount }
+				);
+			const receipt = await tx.wait();
+
+			// Vérifier l'événement Debug pour le placement du pari
+			const debugEvents = receipt?.logs.filter(
+				(log) =>
+					log.topics[0] ===
+					ethers.id('Debug(string,bytes32,uint256,address,uint256)')
+			);
+			console.log('Debug events from placeBet:', debugEvents);
+
+			await ethers.provider.send('evm_increaseTime', [86400]);
+			await ethers.provider.send('evm_mine', []);
+			console.log('Time advanced');
+
+			const currentDay = Math.floor(Date.now() / 86400000);
+			await chartsBet.closePoolAndAnnounceWinner(
+				ethers.encodeBytes32String('WW'),
+				currentDay,
+				ethers.encodeBytes32String('Artist0')
+			);
+			console.log('Pool closed and winner announced');
+
+			// Capturer tous les événements lors du règlement du pari
+			const settleTx = await chartsBet
+				.connect(addr1)
+				.settleBet(ethers.encodeBytes32String('WW'), currentDay);
+			const settleReceipt = await settleTx.wait();
+
+			// Afficher tous les événements émis lors du règlement
+			console.log('All events from settleBet:', settleReceipt?.logs);
+
+			// Vérifier si l'événement BetSettled a été émis
+			const betSettledEvent = settleReceipt?.logs.find(
+				(log) =>
+					log.topics[0] ===
+					ethers.id(
+						'BetSettled(address,bytes32,uint256,uint256,bool)'
+					)
+			);
+			expect(betSettledEvent).to.not.be.undefined;
+
+			if (betSettledEvent) {
+				const [bettor, country, day, amount, won] =
+					ethers.AbiCoder.defaultAbiCoder().decode(
+						['address', 'bytes32', 'uint256', 'uint256', 'bool'],
+						betSettledEvent.data
+					);
+				console.log('BetSettled event data:', {
+					bettor,
+					country,
+					day,
+					amount,
+					won,
+				});
+			}
+		});
+	});
+
+	describe('getOdds', function () {
+		beforeEach(async function () {
+			const artists = Array(10)
+				.fill(0)
+				.map((_, i) => ethers.encodeBytes32String(`Artist${i}`));
+			await chartsBet.updateTop10(
+				ethers.encodeBytes32String('WW'),
+				artists
+			);
+		});
+
+		it('Should return correct odds for top 10 artist', async function () {
+			const odds = await chartsBet.getOdds(
+				ethers.encodeBytes32String('WW'),
+				ethers.encodeBytes32String('Artist0')
+			);
+			expect(odds).to.equal(120);
+		});
+
+		it('Should return correct odds for lower ranked artist', async function () {
+			const odds = await chartsBet.getOdds(
+				ethers.encodeBytes32String('WW'),
+				ethers.encodeBytes32String('Artist5')
+			);
+			expect(odds).to.equal(220);
+		});
+
+		it('Should return outsider odds for non-top 10 artist', async function () {
+			const odds = await chartsBet.getOdds(
+				ethers.encodeBytes32String('WW'),
+				ethers.encodeBytes32String('OutsideArtist')
+			);
+			expect(odds).to.equal(350);
+		});
+	});
+
+	describe('updateTop10', function () {
+		it('Should update top 10 artists', async function () {
+			const artists = Array(10)
+				.fill(0)
+				.map((_, i) => ethers.encodeBytes32String(`Artist${i}`));
+			await chartsBet.updateTop10(
+				ethers.encodeBytes32String('WW'),
+				artists
+			);
+			const firstArtist = await chartsBet.top10Artists(
+				ethers.encodeBytes32String('WW'),
+				0
+			);
+			expect(firstArtist).to.equal(ethers.encodeBytes32String('Artist0'));
+		});
+
+		it('Should revert if not exactly 10 artists', async function () {
+			const artists = Array(9)
+				.fill(0)
+				.map((_, i) => ethers.encodeBytes32String(`Artist${i}`));
+			await expect(
+				chartsBet.updateTop10(ethers.encodeBytes32String('WW'), artists)
+			).to.be.revertedWithCustomError(chartsBet, 'InvalidArtistCount');
+		});
+	});
+
+	describe('Admin functions', function () {
+		it('Should allow owner to pause and unpause', async function () {
+			await chartsBet.pause();
 			expect(await chartsBet.paused()).to.be.true;
 
-			await chartsBet.toggleContractActive();
+			await chartsBet.unpause();
 			expect(await chartsBet.paused()).to.be.false;
 		});
 
-		it('Should prevent actions when paused', async function () {
-			await chartsBet.toggleContractActive();
-			await expect(
-				chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'))
-			).to.be.revertedWithCustomError(chartsBet, 'EnforcedPause');
-		});
-	});
-
-	describe('Getter Functions', function () {
-		beforeEach(async function () {
-			await chartsBet.createLeaderboard(ethers.encodeBytes32String('FR'));
-			const topArtists = [
-				ethers.encodeBytes32String('GIMS'),
-				ethers.encodeBytes32String('Carbonne'),
-				ethers.encodeBytes32String('Leto'),
-				ethers.encodeBytes32String('Lacrim'),
-				ethers.encodeBytes32String('Dadi'),
-			];
-			const tx = await chartsOracle.requestLeaderboardData(
-				ethers.encodeBytes32String('FR')
+		it('Should allow owner to withdraw', async function () {
+			await chartsBet.openAllDailyPools();
+			await chartsBet.updateTop10(
+				ethers.encodeBytes32String('WW'),
+				Array(10).fill(ethers.encodeBytes32String('Artist'))
 			);
-			const receipt = (await tx.wait()) as any;
-			const requestId = receipt.logs[0].topics[1];
-			await chartsOracle.fulfillLeaderboardData(
-				requestId,
-				ethers.encodeBytes32String('FR'),
-				topArtists
-			);
-
-			for (const artist of topArtists) {
-				const odds = await chartsBet.getArtistOdds(
-					ethers.encodeBytes32String('FR'),
-					artist
+			await chartsBet
+				.connect(addr1)
+				.placeBet(
+					ethers.encodeBytes32String('WW'),
+					ethers.encodeBytes32String('Artist'),
+					{ value: ethers.parseEther('0.1') }
 				);
-			}
-		});
 
-		it('Should return correct artist odds', async function () {
-			const odds = await chartsBet.getArtistOdds(
-				ethers.encodeBytes32String('FR'),
-				ethers.encodeBytes32String('GIMS')
+			const initialBalance = await ethers.provider.getBalance(
+				owner.address
 			);
-			expect(odds).to.equal(120n);
-		});
+			await chartsBet.withdraw();
+			const finalBalance = await ethers.provider.getBalance(
+				owner.address
+			);
 
-		it('Should return correct total bets on artist', async function () {
-			await chartsBet
-				.connect(addr1)
-				.placeBet(ethers.encodeBytes32String('FR'), 'GIMS', {
-					value: ethers.parseEther('0.1'),
-				});
-			const totalBets = await chartsBet.getTotalBetsOnArtist(
-				ethers.encodeBytes32String('FR'),
-				'GIMS'
-			);
-			expect(totalBets).to.equal(ethers.parseEther('0.1'));
-		});
-
-		it('Should return correct total bet amount', async function () {
-			await chartsBet
-				.connect(addr1)
-				.placeBet(ethers.encodeBytes32String('FR'), 'GIMS', {
-					value: ethers.parseEther('0.1'),
-				});
-			await chartsBet
-				.connect(addr2)
-				.placeBet(ethers.encodeBytes32String('FR'), 'Carbonne', {
-					value: ethers.parseEther('0.2'),
-				});
-			const totalBetAmount = await chartsBet.getTotalBetAmount(
-				ethers.encodeBytes32String('FR')
-			);
-			expect(totalBetAmount).to.equal(ethers.parseEther('0.3'));
-		});
-
-		it('Should return correct bets in country', async function () {
-			await chartsBet
-				.connect(addr1)
-				.placeBet(ethers.encodeBytes32String('FR'), 'GIMS', {
-					value: ethers.parseEther('0.1'),
-				});
-			await chartsBet
-				.connect(addr2)
-				.placeBet(ethers.encodeBytes32String('FR'), 'Carbonne', {
-					value: ethers.parseEther('0.2'),
-				});
-			const bets = await chartsBet.getBetsInCountry(
-				ethers.encodeBytes32String('FR')
-			);
-			expect(bets.length).to.equal(2);
+			expect(finalBalance).to.be.gt(initialBalance);
 		});
 	});
 });

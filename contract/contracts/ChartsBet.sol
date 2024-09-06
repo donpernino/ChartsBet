@@ -6,57 +6,75 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
-import "./ChartsOracle.sol";
-import "./Errors.sol";
-
-contract ChartsBet is Initializable, Ownable, Pausable, ReentrancyGuard {
+contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     struct Bet {
-        address user;
-        uint256 amount;
+        address bettor;
         bytes32 artist;
+        uint256 amount;
         uint256 odds;
     }
 
-    struct Leaderboard {
-        bytes32 country;
+    struct DailyBettingPool {
+        uint256 openingTime;
+        uint256 closingTime;
+        mapping(address => Bet) bets;
+        uint256 totalBets;
+        uint256 totalAmount;
         bytes32 winningArtist;
-        bool isClosed;
-        uint256 totalBetAmount;
-        uint256 startTime;
-        mapping(bytes32 => uint256) totalBetsOnArtist;
-        mapping(bytes32 => uint256) artistRank;
-        mapping(bytes32 => uint256) artistOdds;
-        Bet[] bets;
+        bool closed;
     }
 
-    mapping(bytes32 => Leaderboard) public leaderboards;
-    bytes32[] public countryList;
+    uint256 public constant BET_DURATION = 1 days;
+    uint256 public constant MAX_BET = 1 ether;
+    uint256 public constant OUTSIDER_ODDS = 350; // 3.50 in basis points
 
-    ChartsOracle public oracle;
-    uint256 public constant LEADERBOARD_DURATION = 7 days;
     mapping(bytes32 => bool) public validCountries;
+    mapping(bytes32 => mapping(uint256 => DailyBettingPool)) public dailyPools; // country => day => pool
+    mapping(bytes32 => bytes32[]) public top10Artists;
+    mapping(bytes32 => mapping(bytes32 => uint256)) public artistRanks;
 
-    uint256 public constant WITHDRAWAL_DELAY = 2 days;
-    uint256 public withdrawalRequestTime;
-
-    event LeaderboardCreated(bytes32 indexed country);
-    event LeaderboardClosed(bytes32 indexed country);
     event BetPlaced(
-        address indexed user,
+        address indexed bettor,
         bytes32 indexed country,
+        uint256 indexed day,
         bytes32 artist,
-        uint256 amount
+        uint256 amount,
+        uint256 odds
     );
-    event TopArtistsFulfilled(bytes32 indexed country);
-    event DailyWinnerFulfilled(bytes32 indexed country, bytes32 winningArtist);
-    event OracleUpdated(address newOracle);
-    event WithdrawalRequested(uint256 requestTime);
-    event WithdrawalExecuted(uint256 amount);
-    event ArtistOddsSet(bytes32 indexed country, bytes32 artist, uint256 odds);
+    event PoolClosed(
+        bytes32 indexed country,
+        uint256 indexed day,
+        bytes32 winningArtist
+    );
+    event BetSettled(
+        address indexed bettor,
+        bytes32 indexed country,
+        uint256 indexed day,
+        uint256 amount,
+        bool won
+    );
+    event PoolOpened(
+        bytes32 indexed country,
+        uint256 indexed day,
+        uint256 openingTime,
+        uint256 closingTime
+    );
 
-    constructor(address _owner, address _oracle) Ownable(_owner) {
-        oracle = ChartsOracle(_oracle);
-        bytes32[9] memory countries = [
+    error InvalidCountry();
+    error PoolNotOpen();
+    error PoolAlreadyClosed();
+    error BetAlreadyPlaced();
+    error BetTooHigh();
+    error NoBetPlaced();
+    error PoolNotReadyToClose();
+    error InvalidArtistCount();
+
+    constructor(address initialOwner) Ownable(initialOwner) {
+        _transferOwnership(msg.sender);
+    }
+
+    function initialize() public initializer {
+        bytes32[8] memory countries = [
             bytes32("WW"),
             bytes32("BR"),
             bytes32("DE"),
@@ -64,241 +82,137 @@ contract ChartsBet is Initializable, Ownable, Pausable, ReentrancyGuard {
             bytes32("FR"),
             bytes32("IT"),
             bytes32("PT"),
-            bytes32("US"),
-            bytes32("TEST")
+            bytes32("US")
         ];
+
         for (uint i = 0; i < countries.length; i++) {
             validCountries[countries[i]] = true;
         }
     }
 
-    function createLeaderboard(bytes32 country) public onlyOwner whenNotPaused {
-        if (!validCountries[country]) {
-            revert InvalidCountryCode();
-        }
+    function openAllDailyPools() external onlyOwner {
+        uint256 currentDay = block.timestamp / 1 days;
+        bytes32[8] memory countries = [
+            bytes32("WW"),
+            bytes32("BR"),
+            bytes32("DE"),
+            bytes32("ES"),
+            bytes32("FR"),
+            bytes32("IT"),
+            bytes32("PT"),
+            bytes32("US")
+        ];
 
-        Leaderboard storage existingLeaderboard = leaderboards[country];
-        if (existingLeaderboard.country != bytes32(0)) {
-            if (
-                !existingLeaderboard.isClosed &&
-                block.timestamp <
-                existingLeaderboard.startTime + LEADERBOARD_DURATION
-            ) {
-                revert LeaderboardStillActive();
+        for (uint i = 0; i < countries.length; i++) {
+            bytes32 country = countries[i];
+            DailyBettingPool storage pool = dailyPools[country][currentDay];
+            if (pool.openingTime == 0) {
+                pool.openingTime = block.timestamp;
+                pool.closingTime = block.timestamp + BET_DURATION;
+                emit PoolOpened(
+                    country,
+                    currentDay,
+                    pool.openingTime,
+                    pool.closingTime
+                );
             }
-            delete leaderboards[country];
         }
-
-        Leaderboard storage newLeaderboard = leaderboards[country];
-        newLeaderboard.country = country;
-        newLeaderboard.isClosed = false;
-        newLeaderboard.startTime = block.timestamp;
-        newLeaderboard.totalBetAmount = 0;
-        countryList.push(country);
-
-        emit LeaderboardCreated(country);
-    }
-
-    function closeLeaderboard(bytes32 country) public onlyOwner {
-        Leaderboard storage leaderboard = leaderboards[country];
-        if (leaderboard.country == bytes32(0)) {
-            revert LeaderboardNotFound();
-        }
-        if (leaderboard.isClosed) {
-            revert LeaderboardAlreadyClosed();
-        }
-        leaderboard.isClosed = true;
-        emit LeaderboardClosed(country);
-    }
-
-    function isLeaderboardExpired(bytes32 country) public view returns (bool) {
-        Leaderboard storage leaderboard = leaderboards[country];
-        return block.timestamp >= leaderboard.startTime + LEADERBOARD_DURATION;
     }
 
     function placeBet(
         bytes32 country,
         bytes32 artist
-    ) public payable whenNotPaused nonReentrant {
-        Leaderboard storage leaderboard = leaderboards[country];
-        if (leaderboard.country == bytes32(0)) {
-            revert LeaderboardNotFound();
-        }
-        if (leaderboard.isClosed || isLeaderboardExpired(country)) {
-            revert BettingClosed();
-        }
+    ) external payable whenNotPaused nonReentrant {
+        if (!validCountries[country]) revert InvalidCountry();
+        uint256 currentDay = block.timestamp / 1 days;
+        DailyBettingPool storage pool = dailyPools[country][currentDay];
 
-        uint256 odds = leaderboard.artistOdds[artist];
-        if (odds == 0) {
-            revert ArtistNotInLeaderboard();
-        }
+        if (
+            block.timestamp < pool.openingTime ||
+            block.timestamp >= pool.closingTime
+        ) revert PoolNotOpen();
+        if (pool.bets[msg.sender].amount != 0) revert BetAlreadyPlaced();
+        if (msg.value > MAX_BET) revert BetTooHigh();
 
-        leaderboard.totalBetAmount += msg.value;
-        leaderboard.totalBetsOnArtist[artist] += msg.value;
-        leaderboard.bets.push(
-            Bet({
-                user: msg.sender,
-                amount: msg.value,
-                artist: artist,
-                odds: odds
-            })
+        uint256 odds = getOdds(country, artist);
+        pool.bets[msg.sender] = Bet(msg.sender, artist, msg.value, odds);
+        pool.totalBets++;
+        pool.totalAmount += msg.value;
+
+        emit BetPlaced(
+            msg.sender,
+            country,
+            currentDay,
+            artist,
+            msg.value,
+            odds
         );
-
-        emit BetPlaced(msg.sender, country, artist, msg.value);
     }
 
-    function fulfillTopArtists(
+    function closePoolAndAnnounceWinner(
         bytes32 country,
-        bytes32[] memory topArtists
-    ) public whenNotPaused {
-        if (msg.sender != address(oracle)) revert OnlyOracleAllowed();
-
-        if (!validCountries[country]) {
-            revert InvalidCountryCode();
-        }
-
-        Leaderboard storage leaderboard = leaderboards[country];
-        if (leaderboard.country == bytes32(0)) {
-            revert LeaderboardNotFound();
-        }
-
-        if (leaderboard.isClosed) {
-            revert LeaderboardAlreadyClosed();
-        }
-
-        assignRanksAndOdds(country, topArtists);
-        emit TopArtistsFulfilled(country);
-    }
-
-    function fulfillDailyWinner(
-        bytes32 country,
+        uint256 day,
         bytes32 winningArtist
-    ) public whenNotPaused nonReentrant {
-        if (msg.sender != address(oracle)) revert OnlyOracleAllowed();
+    ) external onlyOwner {
+        DailyBettingPool storage pool = dailyPools[country][day];
+        if (block.timestamp < pool.closingTime) revert PoolNotReadyToClose();
+        if (pool.closed) revert PoolAlreadyClosed();
 
-        Leaderboard storage lb = leaderboards[country];
-        if (lb.country == bytes32(0)) {
-            revert LeaderboardNotFound();
-        }
-        if (lb.isClosed) {
-            revert BettingClosed();
-        }
+        pool.winningArtist = winningArtist;
+        pool.closed = true;
 
-        lb.winningArtist = winningArtist;
-        lb.isClosed = true;
-
-        for (uint i = 0; i < lb.bets.length; i++) {
-            Bet storage bet = lb.bets[i];
-            if (bet.artist == winningArtist) {
-                uint256 winnings = (bet.amount * bet.odds) / 100;
-                payable(bet.user).transfer(winnings);
-            }
-        }
-
-        emit DailyWinnerFulfilled(country, winningArtist);
-        emit LeaderboardClosed(country);
+        emit PoolClosed(country, day, winningArtist);
     }
 
-    function updateOracle(address newOracle) public onlyOwner {
-        if (newOracle == address(0)) revert InvalidOracleAddress();
-        oracle = ChartsOracle(newOracle);
-        emit OracleUpdated(newOracle);
+    function settleBet(bytes32 country, uint256 day) external nonReentrant {
+        DailyBettingPool storage pool = dailyPools[country][day];
+        if (!pool.closed) revert PoolNotOpen();
+
+        Bet storage bet = pool.bets[msg.sender];
+        if (bet.amount == 0) revert NoBetPlaced();
+
+        bool won = bet.artist == pool.winningArtist;
+        uint256 payout = won ? (bet.amount * bet.odds) / 100 : 0;
+
+        if (payout > 0) {
+            payable(msg.sender).transfer(payout);
+        }
+
+        emit BetSettled(msg.sender, country, day, payout, won);
+        delete pool.bets[msg.sender];
     }
 
-    function getArtistOdds(
+    function getOdds(
         bytes32 country,
         bytes32 artist
     ) public view returns (uint256) {
-        return leaderboards[country].artistOdds[artist];
+        uint256 rank = artistRanks[country][artist];
+        if (rank == 0) return OUTSIDER_ODDS;
+        return 120 + (rank - 1) * 20; // 1.20 to 3.00
     }
 
-    function getTotalBetsOnArtist(
+    function updateTop10(
         bytes32 country,
-        bytes32 artist
-    ) public view returns (uint256) {
-        return leaderboards[country].totalBetsOnArtist[artist];
-    }
-
-    function getTotalBetAmount(bytes32 country) public view returns (uint256) {
-        return leaderboards[country].totalBetAmount;
-    }
-
-    function getBetsInCountry(
-        bytes32 country
-    ) public view returns (Bet[] memory) {
-        Leaderboard storage lb = leaderboards[country];
-        return lb.bets;
-    }
-
-    function toggleContractActive() public onlyOwner {
-        if (paused()) {
-            _unpause();
-        } else {
-            _pause();
+        bytes32[] calldata artists
+    ) external onlyOwner {
+        if (artists.length != 10) revert InvalidArtistCount();
+        delete top10Artists[country];
+        for (uint i = 0; i < 10; i++) {
+            top10Artists[country].push(artists[i]);
+            artistRanks[country][artists[i]] = i + 1;
         }
     }
 
-    function requestWithdrawal() public onlyOwner {
-        withdrawalRequestTime = block.timestamp;
-        emit WithdrawalRequested(withdrawalRequestTime);
+    // Admin functions
+    function pause() external onlyOwner {
+        _pause();
     }
 
-    function executeWithdrawal() public onlyOwner {
-        if (block.timestamp < withdrawalRequestTime + WITHDRAWAL_DELAY)
-            revert WithdrawalDelayNotMet();
-        if (address(this).balance == 0) revert NoFundsToWithdraw();
-
-        uint256 amount = address(this).balance;
-        payable(owner()).transfer(amount);
-        withdrawalRequestTime = 0;
-        emit WithdrawalExecuted(amount);
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
-    function assignRanksAndOdds(
-        bytes32 country,
-        bytes32[] memory topArtists
-    ) internal {
-        Leaderboard storage lb = leaderboards[country];
-        mapping(bytes32 => uint256) storage artistAppearances = lb.artistRank;
-
-        // Reset previous ranks and odds
-        for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artist = topArtists[i];
-            lb.artistRank[artist] = 0;
-            lb.artistOdds[artist] = 0;
-            artistAppearances[artist] = 0;
-        }
-
-        // Count appearances
-        for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artist = topArtists[i];
-            artistAppearances[artist]++;
-        }
-
-        // Assign ranks and calculate odds
-        for (uint i = 0; i < topArtists.length; i++) {
-            bytes32 artist = topArtists[i];
-            uint256 rank = i + 1; // Rank starts at 1
-            lb.artistRank[artist] = rank;
-            uint256 odds = calculateOdds(rank, artistAppearances[artist]);
-            lb.artistOdds[artist] = odds;
-            emit ArtistOddsSet(country, artist, odds);
-        }
+    function withdraw() external onlyOwner {
+        payable(owner()).transfer(address(this).balance);
     }
-
-    function calculateOdds(
-        uint256 rank,
-        uint256 appearances
-    ) internal pure returns (uint256 odds) {
-        uint256 effectiveRank = (rank + (rank + appearances - 1)) / 2;
-        odds = 120 + (effectiveRank - 1) * 20;
-        return odds;
-    }
-
-    function testOracleConnection() public onlyOwner {
-        emit LeaderboardCreated(bytes32("TEST"));
-    }
-
-    // Add a gap for future variable additions without affecting storage layout
-    uint256[50] private __gap;
 }
