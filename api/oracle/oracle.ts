@@ -85,6 +85,11 @@ contract.on('LeaderboardCreated', async (countryBytes32: string) => {
 	);
 });
 
+contract.on('RequestDailyWinner', async (countryBytes32: string) => {
+	// fetch daily winner and send it to oracle
+	return 'test';
+});
+
 // Global error handling
 process.on('unhandledRejection', (error: Error) => {
 	console.error(

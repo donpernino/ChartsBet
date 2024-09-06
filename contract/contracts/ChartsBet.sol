@@ -1,20 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.24;
 
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
 import "./ChartsOracle.sol";
 import "./Errors.sol";
 
-contract ChartsBet is
-    Initializable,
-    OwnableUpgradeable,
-    PausableUpgradeable,
-    ReentrancyGuardUpgradeable
-{
+contract ChartsBet is Initializable, Ownable, Pausable, ReentrancyGuard {
     struct Bet {
         address user;
         uint256 amount;
@@ -59,11 +54,7 @@ contract ChartsBet is
     event WithdrawalExecuted(uint256 amount);
     event ArtistOddsSet(bytes32 indexed country, bytes32 artist, uint256 odds);
 
-    function initialize(address _owner, address _oracle) public initializer {
-        __Ownable_init(_owner);
-        __Pausable_init();
-        __ReentrancyGuard_init();
-
+    constructor(address _owner, address _oracle) Ownable(_owner) {
         oracle = ChartsOracle(_oracle);
         bytes32[9] memory countries = [
             bytes32("WW"),
