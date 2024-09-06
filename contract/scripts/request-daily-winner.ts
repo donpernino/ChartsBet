@@ -1,7 +1,7 @@
 import { ethers } from 'hardhat';
 
 async function requestDailyWinner(country: string) {
-	const chartsOracleAddress = '0x5dcABaE052024C0d901F3e0Badb7d6049810Aeb0';
+	const chartsOracleAddress = '0x2B4a06C0aD6d5fe39bBf15703e7ffd16644af546';
 	const ChartsOracle = await ethers.getContractFactory('ChartsOracle');
 	const chartsOracle = ChartsOracle.attach(chartsOracleAddress);
 
