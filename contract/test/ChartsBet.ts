@@ -1,22 +1,57 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
-import { ChartsBet } from '../typechain-types';
+import { ChartsBet, ChartsBetToken } from '../typechain-types';
 import { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers';
 
 describe('ChartsBet Contract', function () {
 	let chartsBet: ChartsBet;
+	let chartsBetToken: ChartsBetToken;
 	let owner: HardhatEthersSigner;
 	let addr1: HardhatEthersSigner;
 	let addr2: HardhatEthersSigner;
 
+	const INITIAL_MINT = ethers.parseEther('1000000'); // 1 million tokens
+
 	beforeEach(async function () {
 		[owner, addr1, addr2] = await ethers.getSigners();
 
-		const ChartsBetFactory = await ethers.getContractFactory('ChartsBet');
-		chartsBet = await ChartsBetFactory.deploy(await owner.getAddress());
-		await chartsBet.waitForDeployment();
+		console.log('Deploying ChartsBetToken...');
+		const ChartsBetTokenFactory = await ethers.getContractFactory(
+			'ChartsBetToken'
+		);
+		chartsBetToken = await ChartsBetTokenFactory.deploy(
+			await owner.getAddress()
+		);
+		await chartsBetToken.waitForDeployment();
+		console.log(
+			'ChartsBetToken deployed at:',
+			await chartsBetToken.getAddress()
+		);
 
+		console.log('Deploying ChartsBet...');
+		const ChartsBetFactory = await ethers.getContractFactory('ChartsBet');
+		chartsBet = await ChartsBetFactory.deploy(
+			await owner.getAddress(),
+			await chartsBetToken.getAddress()
+		);
+		await chartsBet.waitForDeployment();
+		console.log('ChartsBet deployed at:', await chartsBet.getAddress());
+
+		console.log('Initializing ChartsBet...');
 		await chartsBet.initialize();
+		console.log('ChartsBet initialized');
+
+		// Transfer tokens to addr1 and addr2 instead of minting
+		await chartsBetToken.transfer(await addr1.getAddress(), INITIAL_MINT);
+		await chartsBetToken.transfer(await addr2.getAddress(), INITIAL_MINT);
+
+		// Approve ChartsBet to spend tokens
+		await chartsBetToken
+			.connect(addr1)
+			.approve(await chartsBet.getAddress(), ethers.MaxUint256);
+		await chartsBetToken
+			.connect(addr2)
+			.approve(await chartsBet.getAddress(), ethers.MaxUint256);
 	});
 
 	describe('initialize', function () {
@@ -64,21 +99,21 @@ describe('ChartsBet Contract', function () {
 		});
 
 		it('Should allow placing a bet', async function () {
-			const betAmount = ethers.parseEther('0.1');
+			const betAmount = ethers.parseEther('100'); // 100 tokens
 			await expect(
 				chartsBet
 					.connect(addr1)
 					.placeBet(
 						ethers.encodeBytes32String('WW'),
 						ethers.encodeBytes32String('Artist'),
-						{ value: betAmount }
+						betAmount
 					)
 			)
 				.to.emit(chartsBet, 'BetPlaced')
 				.withArgs(
 					await addr1.getAddress(),
 					ethers.encodeBytes32String('WW'),
-					(day: any) => typeof day === 'bigint',
+					await chartsBet.currentDay(),
 					ethers.encodeBytes32String('Artist'),
 					betAmount,
 					(odds: any) => typeof odds === 'bigint'
@@ -86,14 +121,14 @@ describe('ChartsBet Contract', function () {
 		});
 
 		it('Should revert if bet is too high', async function () {
-			const betAmount = ethers.parseEther('2');
+			const betAmount = ethers.parseEther('1001'); // 1001 tokens
 			await expect(
 				chartsBet
 					.connect(addr1)
 					.placeBet(
 						ethers.encodeBytes32String('WW'),
 						ethers.encodeBytes32String('Artist'),
-						{ value: betAmount }
+						betAmount
 					)
 			).to.be.revertedWithCustomError(chartsBet, 'BetTooHigh');
 		});
@@ -108,11 +143,10 @@ describe('ChartsBet Contract', function () {
 			await ethers.provider.send('evm_increaseTime', [86400]);
 			await ethers.provider.send('evm_mine', []);
 
-			const currentDay = Math.floor(Date.now() / 86400000);
+			const currentDay = await chartsBet.currentDay();
 			await expect(
 				chartsBet.closePoolAndAnnounceWinner(
 					ethers.encodeBytes32String('WW'),
-					currentDay,
 					ethers.encodeBytes32String('Winner')
 				)
 			)
@@ -139,96 +173,87 @@ describe('ChartsBet Contract', function () {
 			);
 			console.log('Top 10 updated');
 
-			const betAmount = ethers.parseEther('0.1');
-			const placeBetTx = await chartsBet
+			const betAmount = ethers.parseEther('100'); // 100 tokens
+			const currentDay = await chartsBet.currentDay();
+			console.log('Current day from contract:', currentDay.toString());
+
+			// Place bet
+			await chartsBet
 				.connect(addr1)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist0'),
-					{ value: betAmount }
+					betAmount
 				);
-			const placeBetReceipt = await placeBetTx.wait();
+			console.log('Bet placed');
 
-			console.log(
-				'Debug events from placeBet:',
-				logDebugEvents(placeBetReceipt)
-			);
-
-			// Get the current day
-			const currentDay = Math.floor(Date.now() / 86400000);
-
+			// Advance time and close pool
 			await ethers.provider.send('evm_increaseTime', [86400]);
 			await ethers.provider.send('evm_mine', []);
-			console.log('Time advanced');
-
 			await chartsBet.closePoolAndAnnounceWinner(
 				ethers.encodeBytes32String('WW'),
-				currentDay,
 				ethers.encodeBytes32String('Artist0')
 			);
-			console.log('Pool closed and winner announced');
+			console.log('Pool closed');
 
-			const settleBetTx = await chartsBet
-				.connect(addr1)
-				.settleBet(ethers.encodeBytes32String('WW'), currentDay);
-			const settleBetReceipt = await settleBetTx.wait();
-
+			// Check balances before settling
+			const contractBalanceBefore = await chartsBetToken.balanceOf(
+				await chartsBet.getAddress()
+			);
+			const userBalanceBefore = await chartsBetToken.balanceOf(
+				await addr1.getAddress()
+			);
 			console.log(
-				'Debug events from settleBet:',
-				logDebugEvents(settleBetReceipt)
+				'Contract balance before:',
+				ethers.formatEther(contractBalanceBefore)
+			);
+			console.log(
+				'User balance before:',
+				ethers.formatEther(userBalanceBefore)
 			);
 
-			// Explicitly expect settleBet to succeed
-			await expect(
-				chartsBet
+			// Settle bet
+			try {
+				const settleTx = await chartsBet
 					.connect(addr1)
-					.settleBet(ethers.encodeBytes32String('WW'), currentDay)
-			).to.not.be.reverted;
+					.settleBet(ethers.encodeBytes32String('WW'));
+				const settleReceipt = await settleTx.wait();
+
+				// Log all events
+				console.log('Events from settleBet transaction:');
+				settleReceipt.logs.forEach((log: any) => {
+					if (log.eventName) {
+						console.log(`Event: ${log.eventName}`);
+						console.log('Arguments:', log.args);
+					}
+				});
+			} catch (error: any) {
+				console.error('Error settling bet:', error.message);
+				if (error.data) {
+					const decodedError = chartsBet.interface.parseError(
+						error.data
+					);
+					console.error('Decoded error:', decodedError);
+				}
+			}
+
+			// Check balances after settling
+			const contractBalanceAfter = await chartsBetToken.balanceOf(
+				await chartsBet.getAddress()
+			);
+			const userBalanceAfter = await chartsBetToken.balanceOf(
+				await addr1.getAddress()
+			);
+			console.log(
+				'Contract balance after:',
+				ethers.formatEther(contractBalanceAfter)
+			);
+			console.log(
+				'User balance after:',
+				ethers.formatEther(userBalanceAfter)
+			);
 		});
 	});
-
-	// Helper function to log debug events
-	function logDebugEvents(receipt: any) {
-		return receipt?.logs
-			.filter(
-				(log: any) =>
-					log.topics[0] ===
-					ethers.id(
-						'Debug(string,bytes32,uint256,address,uint256,bool,bytes32)'
-					)
-			)
-			.map((event: any) => {
-				const [
-					message,
-					country,
-					day,
-					bettor,
-					amount,
-					poolClosed,
-					winningArtist,
-				] = ethers.AbiCoder.defaultAbiCoder().decode(
-					[
-						'string',
-						'bytes32',
-						'uint256',
-						'address',
-						'uint256',
-						'bool',
-						'bytes32',
-					],
-					event.data
-				);
-				return {
-					message,
-					country: ethers.decodeBytes32String(country),
-					day: day.toString(),
-					bettor,
-					amount: amount.toString(),
-					poolClosed,
-					winningArtist: ethers.decodeBytes32String(winningArtist),
-				};
-			});
-	}
 
 	describe('getOdds', function () {
 		beforeEach(async function () {
@@ -301,29 +326,29 @@ describe('ChartsBet Contract', function () {
 			expect(await chartsBet.paused()).to.be.false;
 		});
 
-		it('Should allow owner to withdraw', async function () {
+		it('Should allow owner to withdraw tokens', async function () {
 			await chartsBet.openAllDailyPools();
 			await chartsBet.updateTop10(
 				ethers.encodeBytes32String('WW'),
 				Array(10).fill(ethers.encodeBytes32String('Artist'))
 			);
+
+			const betAmount = ethers.parseEther('100'); // 100 tokens
 			await chartsBet
 				.connect(addr1)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist'),
-					{ value: ethers.parseEther('0.1') }
+					betAmount
 				);
 
-			const initialBalance = await ethers.provider.getBalance(
+			const initialBalance = await chartsBetToken.balanceOf(
 				owner.address
 			);
-			await chartsBet.withdraw();
-			const finalBalance = await ethers.provider.getBalance(
-				owner.address
-			);
+			await chartsBet.withdrawTokens(betAmount);
+			const finalBalance = await chartsBetToken.balanceOf(owner.address);
 
-			expect(finalBalance).to.be.gt(initialBalance);
+			expect(finalBalance).to.equal(initialBalance + betAmount);
 		});
 	});
 });

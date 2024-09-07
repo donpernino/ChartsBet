@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     struct Bet {
@@ -25,13 +26,17 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     }
 
     uint256 public constant BET_DURATION = 1 days;
-    uint256 public constant MAX_BET = 1 ether;
+    uint256 public constant MAX_BET = 1000 * 10 ** 18; // 1000 tokens, assuming 18 decimals
     uint256 public constant OUTSIDER_ODDS = 350; // 3.50 in basis points
+
+    IERC20 public chartsBetToken;
 
     mapping(bytes32 => bool) public validCountries;
     mapping(bytes32 => mapping(uint256 => DailyBettingPool)) public dailyPools; // country => day => pool
     mapping(bytes32 => bytes32[]) public top10Artists;
     mapping(bytes32 => mapping(bytes32 => uint256)) public artistRanks;
+
+    uint256 public currentDay;
 
     event BetPlaced(
         address indexed bettor,
@@ -59,15 +64,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         uint256 openingTime,
         uint256 closingTime
     );
-    event Debug(
-        string message,
-        bytes32 country,
-        uint256 day,
-        address bettor,
-        uint256 amount,
-        bool poolClosed,
-        bytes32 winningArtist
-    );
+    event DebugLog(string message, uint256 value);
 
     error InvalidCountry();
     error PoolNotOpen();
@@ -77,8 +74,16 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     error NoBetPlaced();
     error PoolNotReadyToClose();
     error InvalidArtistCount();
+    error PoolNotClosed();
+    error InsufficientContractBalance();
+    error TransferFailed();
 
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    constructor(
+        address initialOwner,
+        address _chartsBetToken
+    ) Ownable(initialOwner) {
+        chartsBetToken = IERC20(_chartsBetToken);
+    }
 
     function initialize() public initializer {
         bytes32[8] memory countries = [
@@ -98,7 +103,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     }
 
     function openAllDailyPools() external onlyOwner {
-        uint256 currentDay = block.timestamp / 1 days;
+        currentDay = block.timestamp / 1 days;
         bytes32[8] memory countries = [
             bytes32("WW"),
             bytes32("BR"),
@@ -128,10 +133,10 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
 
     function placeBet(
         bytes32 country,
-        bytes32 artist
-    ) external payable whenNotPaused nonReentrant {
+        bytes32 artist,
+        uint256 amount
+    ) external whenNotPaused nonReentrant {
         if (!validCountries[country]) revert InvalidCountry();
-        uint256 currentDay = block.timestamp / 1 days;
         DailyBettingPool storage pool = dailyPools[country][currentDay];
 
         if (
@@ -139,114 +144,66 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             block.timestamp >= pool.closingTime
         ) revert PoolNotOpen();
         if (pool.bets[msg.sender].amount != 0) revert BetAlreadyPlaced();
-        if (msg.value > MAX_BET) revert BetTooHigh();
+        if (amount > MAX_BET) revert BetTooHigh();
 
         uint256 odds = getOdds(country, artist);
-        pool.bets[msg.sender] = Bet(msg.sender, artist, msg.value, odds);
+        pool.bets[msg.sender] = Bet(msg.sender, artist, amount, odds);
         pool.totalBets++;
-        pool.totalAmount += msg.value;
+        pool.totalAmount += amount;
 
-        emit Debug(
-            "Bet placed",
-            country,
-            currentDay,
-            msg.sender,
-            msg.value,
-            pool.closed,
-            pool.winningArtist
+        require(
+            chartsBetToken.transferFrom(msg.sender, address(this), amount),
+            "Token transfer failed"
         );
-        emit BetPlaced(
-            msg.sender,
-            country,
-            currentDay,
-            artist,
-            msg.value,
-            odds
-        );
+
+        emit BetPlaced(msg.sender, country, currentDay, artist, amount, odds);
     }
 
     function closePoolAndAnnounceWinner(
         bytes32 country,
-        uint256 day,
         bytes32 winningArtist
     ) external onlyOwner {
-        DailyBettingPool storage pool = dailyPools[country][day];
+        DailyBettingPool storage pool = dailyPools[country][currentDay];
         if (block.timestamp < pool.closingTime) revert PoolNotReadyToClose();
         if (pool.closed) revert PoolAlreadyClosed();
 
         pool.winningArtist = winningArtist;
         pool.closed = true;
 
-        emit PoolClosed(country, day, winningArtist);
+        emit PoolClosed(country, currentDay, winningArtist);
     }
 
-    function settleBet(bytes32 country, uint256 day) external nonReentrant {
-        DailyBettingPool storage pool = dailyPools[country][day];
-
-        emit Debug(
-            "Settling bet - Pool state",
-            country,
-            day,
-            msg.sender,
-            pool.totalBets,
-            pool.closed,
-            pool.winningArtist
-        );
-        emit Debug(
-            "Settling bet - Pool times",
-            country,
-            day,
-            msg.sender,
-            pool.openingTime,
-            pool.closingTime == 0 ? false : true,
-            bytes32(0)
-        );
-
-        if (!pool.closed) revert PoolNotOpen();
+    function settleBet(bytes32 country) external nonReentrant {
+        DailyBettingPool storage pool = dailyPools[country][currentDay];
+        if (!pool.closed) revert PoolNotClosed();
 
         Bet storage bet = pool.bets[msg.sender];
-
-        emit Debug(
-            "Settling bet - Bet details",
-            country,
-            day,
-            msg.sender,
-            bet.amount,
-            false,
-            bet.artist
-        );
-
-        if (bet.amount == 0) {
-            emit Debug(
-                "No bet found",
-                country,
-                day,
-                msg.sender,
-                0,
-                pool.closed,
-                pool.winningArtist
-            );
-            revert NoBetPlaced();
-        }
+        if (bet.amount == 0) revert NoBetPlaced();
 
         bool won = bet.artist == pool.winningArtist;
         uint256 payout = won ? (bet.amount * bet.odds) / 100 : 0;
 
-        emit Debug(
-            "Bet settled",
-            country,
-            day,
-            msg.sender,
-            payout,
-            pool.closed,
-            pool.winningArtist
-        );
+        emit DebugLog("Bet amount", bet.amount);
+        emit DebugLog("Bet odds", bet.odds);
+        emit DebugLog("Calculated payout", payout);
 
         if (payout > 0) {
-            payable(msg.sender).transfer(payout);
+            uint256 contractBalance = chartsBetToken.balanceOf(address(this));
+            emit DebugLog("Contract balance", contractBalance);
+
+            if (contractBalance < payout) {
+                emit DebugLog("Insufficient balance", contractBalance);
+                revert InsufficientContractBalance();
+            }
+
+            require(
+                chartsBetToken.transfer(msg.sender, payout),
+                "Token transfer failed"
+            );
+            emit DebugLog("Transfer successful", payout);
         }
 
-        emit BetSettled(msg.sender, country, day, payout, won);
+        emit BetSettled(msg.sender, country, currentDay, payout, won);
         delete pool.bets[msg.sender];
     }
 
@@ -280,7 +237,10 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         _unpause();
     }
 
-    function withdraw() external onlyOwner {
-        payable(owner()).transfer(address(this).balance);
+    function withdrawTokens(uint256 amount) external onlyOwner {
+        require(
+            chartsBetToken.transfer(owner(), amount),
+            "Token transfer failed"
+        );
     }
 }
