@@ -162,7 +162,6 @@ describe('ChartsBet Contract', function () {
 	describe('settleBet', function () {
 		it('Should settle bet correctly', async function () {
 			await chartsBet.openAllDailyPools();
-			console.log('Pools opened');
 
 			const artists = Array(10)
 				.fill(0)
@@ -171,11 +170,9 @@ describe('ChartsBet Contract', function () {
 				ethers.encodeBytes32String('WW'),
 				artists
 			);
-			console.log('Top 10 updated');
 
 			const betAmount = ethers.parseEther('100'); // 100 tokens
 			const currentDay = await chartsBet.currentDay();
-			console.log('Current day from contract:', currentDay.toString());
 
 			// Place bet
 			await chartsBet
@@ -185,7 +182,6 @@ describe('ChartsBet Contract', function () {
 					ethers.encodeBytes32String('Artist0'),
 					betAmount
 				);
-			console.log('Bet placed');
 
 			// Advance time and close pool
 			await ethers.provider.send('evm_increaseTime', [86400]);
@@ -194,7 +190,6 @@ describe('ChartsBet Contract', function () {
 				ethers.encodeBytes32String('WW'),
 				ethers.encodeBytes32String('Artist0')
 			);
-			console.log('Pool closed');
 
 			// Check balances before settling
 			const contractBalanceBefore = await chartsBetToken.balanceOf(
@@ -202,14 +197,6 @@ describe('ChartsBet Contract', function () {
 			);
 			const userBalanceBefore = await chartsBetToken.balanceOf(
 				await addr1.getAddress()
-			);
-			console.log(
-				'Contract balance before:',
-				ethers.formatEther(contractBalanceBefore)
-			);
-			console.log(
-				'User balance before:',
-				ethers.formatEther(userBalanceBefore)
 			);
 
 			// Settle bet
@@ -220,7 +207,6 @@ describe('ChartsBet Contract', function () {
 				const settleReceipt = await settleTx.wait();
 
 				// Log all events
-				console.log('Events from settleBet transaction:');
 				settleReceipt.logs.forEach((log: any) => {
 					if (log.eventName) {
 						console.log(`Event: ${log.eventName}`);
@@ -243,14 +229,6 @@ describe('ChartsBet Contract', function () {
 			);
 			const userBalanceAfter = await chartsBetToken.balanceOf(
 				await addr1.getAddress()
-			);
-			console.log(
-				'Contract balance after:',
-				ethers.formatEther(contractBalanceAfter)
-			);
-			console.log(
-				'User balance after:',
-				ethers.formatEther(userBalanceAfter)
 			);
 		});
 	});
