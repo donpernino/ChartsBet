@@ -28,6 +28,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     uint256 public constant BET_DURATION = 1 days;
     uint256 public constant MAX_BET = 1000 * 10 ** 18; // 1000 tokens, assuming 18 decimals
     uint256 public constant OUTSIDER_ODDS = 350; // 3.50 in basis points
+    uint256 public constant RESERVE_PERCENTAGE = 50; // 50% of bets go to reserve
 
     IERC20 public chartsBetToken;
 
@@ -35,8 +36,23 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     mapping(bytes32 => mapping(uint256 => DailyBettingPool)) public dailyPools; // country => day => pool
     mapping(bytes32 => bytes32[]) public top10Artists;
     mapping(bytes32 => mapping(bytes32 => uint256)) public artistRanks;
+    mapping(address => uint256) public pendingPayouts;
 
     uint256 public currentDay;
+
+    // Custom errors
+    error InvalidCountry();
+    error PoolNotOpen();
+    error PoolAlreadyClosed();
+    error BetAlreadyPlaced();
+    error BetTooHigh();
+    error NoBetPlaced();
+    error PoolNotReadyToClose();
+    error InvalidArtistCount();
+    error PoolNotClosed();
+    error InsufficientContractBalance();
+    error TokenTransferFailed();
+    error NoPayoutToClaim();
 
     event BetPlaced(
         address indexed bettor,
@@ -64,19 +80,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         uint256 openingTime,
         uint256 closingTime
     );
-    event DebugLog(string message, uint256 value);
-
-    error InvalidCountry();
-    error PoolNotOpen();
-    error PoolAlreadyClosed();
-    error BetAlreadyPlaced();
-    error BetTooHigh();
-    error NoBetPlaced();
-    error PoolNotReadyToClose();
-    error InvalidArtistCount();
-    error PoolNotClosed();
-    error InsufficientContractBalance();
-    error TransferFailed();
+    event PayoutClaimed(address indexed bettor, uint256 amount);
 
     constructor(
         address initialOwner,
@@ -146,15 +150,14 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         if (pool.bets[msg.sender].amount != 0) revert BetAlreadyPlaced();
         if (amount > MAX_BET) revert BetTooHigh();
 
+        if (!chartsBetToken.transferFrom(msg.sender, address(this), amount)) {
+            revert TokenTransferFailed();
+        }
+
         uint256 odds = getOdds(country, artist);
         pool.bets[msg.sender] = Bet(msg.sender, artist, amount, odds);
         pool.totalBets++;
         pool.totalAmount += amount;
-
-        require(
-            chartsBetToken.transferFrom(msg.sender, address(this), amount),
-            "Token transfer failed"
-        );
 
         emit BetPlaced(msg.sender, country, currentDay, artist, amount, odds);
     }
@@ -183,28 +186,32 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bool won = bet.artist == pool.winningArtist;
         uint256 payout = won ? (bet.amount * bet.odds) / 100 : 0;
 
-        emit DebugLog("Bet amount", bet.amount);
-        emit DebugLog("Bet odds", bet.odds);
-        emit DebugLog("Calculated payout", payout);
+        // Limit payout to the bet amount plus the reserve
+        uint256 maxPayout = bet.amount +
+            (bet.amount * RESERVE_PERCENTAGE) /
+            100;
+        payout = payout > maxPayout ? maxPayout : payout;
+
+        delete pool.bets[msg.sender];
 
         if (payout > 0) {
-            uint256 contractBalance = chartsBetToken.balanceOf(address(this));
-            emit DebugLog("Contract balance", contractBalance);
-
-            if (contractBalance < payout) {
-                emit DebugLog("Insufficient balance", contractBalance);
-                revert InsufficientContractBalance();
-            }
-
-            require(
-                chartsBetToken.transfer(msg.sender, payout),
-                "Token transfer failed"
-            );
-            emit DebugLog("Transfer successful", payout);
+            pendingPayouts[msg.sender] += payout;
         }
 
         emit BetSettled(msg.sender, country, currentDay, payout, won);
-        delete pool.bets[msg.sender];
+    }
+
+    function claimPayout() external nonReentrant {
+        uint256 payout = pendingPayouts[msg.sender];
+        if (payout == 0) revert NoPayoutToClaim();
+
+        pendingPayouts[msg.sender] = 0;
+
+        if (!chartsBetToken.transfer(msg.sender, payout)) {
+            revert TokenTransferFailed();
+        }
+
+        emit PayoutClaimed(msg.sender, payout);
     }
 
     function getOdds(
@@ -238,9 +245,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     }
 
     function withdrawTokens(uint256 amount) external onlyOwner {
-        require(
-            chartsBetToken.transfer(owner(), amount),
-            "Token transfer failed"
-        );
+        if (!chartsBetToken.transfer(owner(), amount)) {
+            revert TokenTransferFailed();
+        }
     }
 }
