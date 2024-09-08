@@ -16,7 +16,7 @@ function startService(scriptPath: string, name: string) {
 	return service;
 }
 
-const apiService = startService(path.join(__dirname, 'index.ts'), 'API');
+const apiService = startService(path.join(__dirname, 'server.ts'), 'API');
 const oracleService = startService(
 	path.join(__dirname, 'oracle', 'oracle.ts'),
 	'Oracle'

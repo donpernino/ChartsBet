@@ -5,35 +5,7 @@ MusicChartsBet
 
 ---
 
-Deployed Addresses (06/09 - 16:07)
+Deployed Addresses (08/09 - 19:46)
 
-ChartsBet#ChartsBet - 0x1781BF835f3CE85a75792f30c83B5B6d3e20E885
-ChartsOracle#ChartsOracle - 0xd61cbb1302C5c8Ff2CBD726Eb8Ff6440A932A139
-
----
-
-Deployed Addresses (06/09 - 15:48)
-
-ChartsBet#ChartsBet - 0x5E19a6eA59F28B8AB96c08cc10064CF0Ce5E1Bb2
-ChartsOracle#ChartsOracle - 0x2B4a06C0aD6d5fe39bBf15703e7ffd16644af546
-
----
-
-Deployed Addresses (06/09 - 14:58)
-
-ChartsBet#ChartsBet - 0x1cf082e63a9127dF98EC74c8145c55034967Ff6D
-ChartsOracle#ChartsOracle - 0x5dcABaE052024C0d901F3e0Badb7d6049810Aeb0
-
----
-
-Deployed Addresses (06/09 - 11:03)
-
-ChartsBet#ChartsBet - 0xfC452e21690ddfb842c95Eb55C9004b46E909D35
-ChartsOracle#ChartsOracle - 0x939F96BFC5BC9BeA71cc047209458dD50D01DF1F
-
----
-
-Deployed Addresses (01/09 - 16:33)
-
-ChartsBet#ChartsBet - 0xFa9D017a1b04d9AA82c350EDebDeea60641e1537
-ChartsOracle#ChartsOracle - 0x54287139da4222664d61e321f0096E3C044a73d4
+ChartsBet#ChartsBet - 0x5FbDB2315678afecb367f032d93F642f64180aa3
+ChartsBetToken#ChartsBetToken - 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512

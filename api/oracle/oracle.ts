@@ -115,4 +115,7 @@ cron.schedule('59 23 * * *', () => {
 	countries.forEach((country) => closePoolAndAnnounceWinner(country));
 });
 
+// Immediately open pools and update top 10 when the script starts
+openPoolsAndUpdateTop10();
+
 console.log('Oracle started, waiting for scheduled executions...');
