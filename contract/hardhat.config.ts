@@ -17,7 +17,7 @@ const config: HardhatUserConfig = {
 	networks: {
 		amoy: {
 			url: `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
-			accounts: [`0x${PRIVATE_KEY_0}`, `0x${PRIVATE_KEY_1}`],
+			accounts: [`0x${PRIVATE_KEY_1}`, `0x${PRIVATE_KEY_0}`],
 			gas: 20000000,
 			gasPrice: 30000000000,
 			ignition: {

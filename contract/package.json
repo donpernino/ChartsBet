@@ -7,12 +7,12 @@
 	"private": true,
 	"devDependencies": {
 		"@chainlink/contracts": "1.2.0",
-		"@nomicfoundation/hardhat-ethers": "3.0.7",
+		"@nomicfoundation/hardhat-ethers": "3.0.8",
 		"@nomicfoundation/hardhat-toolbox": "5.0.0",
 		"@openzeppelin/contracts": "5.0.2",
 		"@openzeppelin/contracts-upgradeable": "5.0.2",
 		"dotenv": "16.4.5",
-		"hardhat": "2.22.9"
+		"hardhat": "2.22.10"
 	},
 	"dependencies": {
 		"@openzeppelin/hardhat-upgrades": "3.2.1"
