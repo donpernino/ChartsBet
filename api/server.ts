@@ -102,10 +102,6 @@ const fetchLeaderboard = async (country: Country) => {
 app.get('/daily-winner/:country', (req: Request, res: Response) => {
 	const country = req.params.country.toUpperCase() as Country;
 
-	if (country === 'TEST') {
-		return res.json('Test Winner');
-	}
-
 	if (!leaderboard[country]) {
 		return res
 			.status(404)
@@ -118,15 +114,6 @@ app.get('/daily-winner/:country', (req: Request, res: Response) => {
 
 app.get('/leaderboard/:country', (req: Request, res: Response) => {
 	const country = req.params.country.toUpperCase() as Country;
-
-	if (country === 'TEST') {
-		const testLeaderboard = [
-			{ artist: 'Test Artist 1', odds: 150 },
-			{ artist: 'Test Artist 2', odds: 200 },
-			{ artist: 'Test Artist 3', odds: 250 },
-		];
-		return res.json(testLeaderboard);
-	}
 
 	if (!leaderboard[country]) {
 		return res
