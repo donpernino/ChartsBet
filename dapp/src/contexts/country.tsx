@@ -8,7 +8,7 @@ interface CountryContextProps {
 const CountryContext = createContext<CountryContextProps | undefined>(undefined);
 
 export const CountryProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [selectedCountry, setSelectedCountry] = useState("WW");
+  const [selectedCountry, setSelectedCountry] = useState("FR");
 
   return (
     <CountryContext.Provider value={{ selectedCountry, setSelectedCountry }}>

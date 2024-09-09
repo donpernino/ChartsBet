@@ -41,16 +41,20 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     uint256 public currentDay;
 
     // Custom errors
-    error InvalidCountry();
-    error PoolNotOpen();
+    error InvalidCountry(bytes32 country);
+    error PoolNotOpen(
+        uint256 currentTime,
+        uint256 openingTime,
+        uint256 closingTime
+    );
     error PoolAlreadyClosed();
-    error BetAlreadyPlaced();
-    error BetTooHigh();
+    error BetAlreadyPlaced(address bettor);
+    error BetTooHigh(uint256 amount, uint256 maxBet);
     error NoBetPlaced();
-    error PoolNotReadyToClose();
-    error InvalidArtistCount();
+    error PoolNotReadyToClose(uint256 currentTime, uint256 closingTime);
+    error InvalidArtistCount(uint256 count);
     error PoolNotClosed();
-    error InsufficientContractBalance();
+    error InsufficientContractBalance(uint256 required, uint256 available);
     error TokenTransferFailed();
     error NoPayoutToClaim();
 
@@ -140,15 +144,21 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bytes32 artist,
         uint256 amount
     ) external whenNotPaused nonReentrant {
-        if (!validCountries[country]) revert InvalidCountry();
+        if (!validCountries[country]) revert InvalidCountry(country);
         DailyBettingPool storage pool = dailyPools[country][currentDay];
 
         if (
             block.timestamp < pool.openingTime ||
             block.timestamp >= pool.closingTime
-        ) revert PoolNotOpen();
-        if (pool.bets[msg.sender].amount != 0) revert BetAlreadyPlaced();
-        if (amount > MAX_BET) revert BetTooHigh();
+        )
+            revert PoolNotOpen(
+                block.timestamp,
+                pool.openingTime,
+                pool.closingTime
+            );
+        if (pool.bets[msg.sender].amount != 0)
+            revert BetAlreadyPlaced(msg.sender);
+        if (amount > MAX_BET) revert BetTooHigh(amount, MAX_BET);
 
         if (!chartsBetToken.transferFrom(msg.sender, address(this), amount)) {
             revert TokenTransferFailed();
@@ -167,7 +177,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bytes32 winningArtist
     ) external onlyOwner {
         DailyBettingPool storage pool = dailyPools[country][currentDay];
-        if (block.timestamp < pool.closingTime) revert PoolNotReadyToClose();
+        if (block.timestamp < pool.closingTime)
+            revert PoolNotReadyToClose(block.timestamp, pool.closingTime);
         if (pool.closed) revert PoolAlreadyClosed();
 
         pool.winningArtist = winningArtist;
@@ -227,7 +238,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bytes32 country,
         bytes32[] calldata artists
     ) external onlyOwner {
-        if (artists.length != 10) revert InvalidArtistCount();
+        if (artists.length != 10) revert InvalidArtistCount(artists.length);
         delete top10Artists[country];
         for (uint i = 0; i < 10; i++) {
             top10Artists[country].push(artists[i]);
@@ -248,5 +259,28 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         if (!chartsBetToken.transfer(owner(), amount)) {
             revert TokenTransferFailed();
         }
+    }
+
+    function getPoolInfo(
+        bytes32 country
+    )
+        external
+        view
+        returns (
+            uint256 openingTime,
+            uint256 closingTime,
+            bool closed,
+            uint256 totalBets,
+            uint256 totalAmount
+        )
+    {
+        DailyBettingPool storage pool = dailyPools[country][currentDay];
+        return (
+            pool.openingTime,
+            pool.closingTime,
+            pool.closed,
+            pool.totalBets,
+            pool.totalAmount
+        );
     }
 }

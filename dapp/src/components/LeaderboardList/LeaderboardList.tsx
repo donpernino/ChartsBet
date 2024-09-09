@@ -2,9 +2,8 @@
 
 import { type FC, useEffect, useState } from "react";
 
-import { Box, Button, Container, HStack, Input, Select, Text } from "@chakra-ui/react";
+import { Box, Container, Select, Text } from "@chakra-ui/react";
 
-import { BetForm } from "../BetForm";
 import { FrFlag, UsFlag, BrFlag, DeFlag, EsFlag, PtFlag, ItFlag } from "../Icons";
 import { TrackCard } from "../TrackCard";
 import { useCountry } from "@/contexts/country";
@@ -66,6 +65,7 @@ const LeaderboardList: FC = () => {
             <CountryFlag />
             <Text whiteSpace="nowrap">Daily Top Songs</Text>
             <Select
+              value={selectedCountry}
               fontSize="4xl"
               fontWeight="bold"
               p="0"

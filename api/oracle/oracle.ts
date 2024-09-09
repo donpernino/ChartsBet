@@ -37,63 +37,92 @@ const contract = new ethers.Contract(
 	wallet
 );
 
-const countries: string[] = ['WW', 'BR', 'DE', 'ES', 'FR', 'IT', 'PT', 'US'];
+const test_countries: string[] = ['FR'];
+const prod_countries: string[] = [
+	'WW',
+	'BR',
+	'DE',
+	'ES',
+	'FR',
+	'IT',
+	'PT',
+	'US',
+];
+
+const countries = test_countries;
 
 function stringToBytes32(str: string): string {
 	return ethers.encodeBytes32String(str);
 }
 
-function checkContractMethods() {
-	const functions = contract.interface.fragments.filter(
-		(f) => f.type === 'function'
-	);
-	functions.forEach((f) => {
-		if ('name' in f) {
-			console.log(`- ${f.name}`);
-		}
-	});
-
-	if (!contract.interface.getFunction('openAllDailyPools')) {
-		console.error('openAllDailyPools function not found in contract ABI');
-		process.exit(1);
-	}
-}
-
-async function checkContractState() {
+async function closeAllPoolsAndAnnounceWinners() {
+	console.log('Closing all pools and announcing winners...');
 	try {
-		const currentDay = await contract.currentDay();
-		const owner = await contract.owner();
-		const isWalletOwner =
-			owner.toLowerCase() === wallet.address.toLowerCase();
+		const nonce = await wallet.getNonce();
 
-		if (!isWalletOwner) {
-			console.error(
-				'The wallet is not the contract owner. This may cause permission issues.'
-			);
-		}
+		const closePromises = countries.map(async (country, index) => {
+			try {
+				const response = await axios.get(
+					`http://localhost:8080/daily-winner/${country}`
+				);
+				const winner = stringToBytes32(response.data);
+
+				// Use the nonce + index to ensure unique nonces for each transaction
+				const tx = await contract.closePoolAndAnnounceWinner(
+					stringToBytes32(country),
+					winner,
+					{
+						gasLimit: 500000,
+						nonce: nonce + index,
+					}
+				);
+
+				const receipt = await tx.wait();
+				console.log(
+					`Closed pool and announced winner for ${country}. Transaction hash: ${receipt.hash}`
+				);
+
+				// Check if the pool is actually closed
+				const pool = await contract.dailyPools(
+					stringToBytes32(country),
+					await contract.currentDay()
+				);
+				if (!pool.closed) {
+					console.warn(
+						`Warning: Pool for ${country} may not have been closed successfully.`
+					);
+				}
+			} catch (error) {
+				console.error(`Error closing pool for ${country}:`, error);
+				if (error.code === 'CALL_EXCEPTION') {
+					console.error('Contract error details:', error.errorArgs);
+				}
+			}
+		});
+
+		await Promise.all(closePromises);
+		console.log('All pools closed and winners announced');
 	} catch (error) {
-		console.error('Error checking contract state:', error);
+		console.error(
+			'Error in closing all pools and announcing winners:',
+			error
+		);
 	}
 }
 
 async function openPoolsAndUpdateTop10() {
 	try {
-		const data = contract.interface.encodeFunctionData('openAllDailyPools');
-		const tx = await wallet.sendTransaction({
-			to: contract.target,
-			data: data,
-			gasLimit: 500000,
-		});
-
+		console.log('Opening daily pools and updating top 10...');
+		const tx = await contract.openAllDailyPools({ gasLimit: 500000 });
 		const receipt = await tx.wait();
-
-		if (receipt?.status === 0) {
-			throw new Error('Transaction failed');
-		}
+		console.log(
+			`Opened all daily pools. Transaction hash: ${receipt.hash}`
+		);
 
 		for (const country of countries) {
 			await updateTop10(country);
 		}
+		console.log('Daily pools opened and top 10 updated successfully');
 	} catch (error) {
 		console.error('Error in daily pool opening and top 10 update:', error);
 	}
@@ -107,46 +136,43 @@ async function updateTop10(country: string) {
 		const top10 = response.data.slice(0, 10).map(stringToBytes32);
 
 		const tx = await contract.updateTop10(stringToBytes32(country), top10, {
-			gasLimit: 300000,
+			gasLimit: 500000,
 		});
-		await tx.wait();
+		const receipt = await tx.wait();
+		console.log(
+			`Updated top 10 for ${country}. Transaction hash: ${receipt.hash}`
+		);
 	} catch (error) {
 		console.error(`Error updating top 10 for ${country}:`, error);
 	}
 }
 
-async function closePoolAndAnnounceWinner(country: string) {
-	try {
-		const response = await axios.get(
-			`http://localhost:8080/daily-winner/${country}`
-		);
-		const winner = stringToBytes32(response.data);
-		const currentDay = Math.floor(Date.now() / 86400000);
-		const tx = await contract.closePoolAndAnnounceWinner(
-			stringToBytes32(country),
-			currentDay,
-			winner
-		);
-		await tx.wait();
-	} catch (error) {
-		console.error(`Error closing pool for ${country}:`, error);
-	}
+async function runDailyTasks() {
+	await closeAllPoolsAndAnnounceWinners();
+	await openPoolsAndUpdateTop10();
 }
 
 async function main() {
-	checkContractMethods();
-	await checkContractState();
-	await openPoolsAndUpdateTop10();
+	try {
+		const owner = await contract.owner();
+		const isWalletOwner =
+			owner.toLowerCase() === wallet.address.toLowerCase();
+		if (!isWalletOwner) {
+			console.error(
+				'The wallet is not the contract owner. This may cause permission issues.'
+			);
+			return;
+		}
 
-	cron.schedule('0 0 * * *', () => {
-		openPoolsAndUpdateTop10();
-	});
+		console.log('Starting daily tasks...');
+		await runDailyTasks();
+		console.log('Daily tasks completed.');
 
-	cron.schedule('59 23 * * *', () => {
-		countries.forEach((country) => closePoolAndAnnounceWinner(country));
-	});
-
-	console.log('Oracle started, waiting for scheduled executions...');
+		cron.schedule('0 0 * * *', runDailyTasks);
+		console.log('Oracle started, waiting for scheduled executions...');
+	} catch (error) {
+		console.error('Error in main function:', error);
+	}
 }
 
 main().catch(console.error);

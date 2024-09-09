@@ -255,6 +255,31 @@ const BetForm: React.FC = () => {
     }
   };
 
+  const getPoolInfo = async (betContract: ethers.Contract, country: string) => {
+    try {
+      const encodedCountry = ethers.encodeBytes32String(country);
+      const poolInfo = await betContract.getPoolInfo(encodedCountry);
+      console.log("Raw Pool Info:", poolInfo);
+
+      // Check if poolInfo is an array-like object
+      if (Array.isArray(poolInfo) || typeof poolInfo === "object") {
+        const [openingTime, closingTime, closed, totalBets, totalAmount] = poolInfo;
+        console.log("Pool Info:", {
+          openingTime: new Date(Number(openingTime) * 1000).toLocaleString(),
+          closingTime: new Date(Number(closingTime) * 1000).toLocaleString(),
+          closed,
+          totalBets: totalBets.toString(),
+          totalAmount: ethers.formatEther(totalAmount),
+        });
+      } else {
+        console.error("Unexpected poolInfo format:", poolInfo);
+      }
+      return poolInfo;
+    } catch (error) {
+      console.error("Error fetching pool info:", error);
+    }
+  };
+
   const handleBet = async () => {
     if (!selectedArtist || !betAmount) {
       toast({
@@ -278,35 +303,84 @@ const BetForm: React.FC = () => {
       return;
     }
 
+    const betContractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+    const tokenContractAddress = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS;
+
+    console.log("Bet Contract Address:", betContractAddress);
+    console.log("Token Contract Address:", tokenContractAddress);
+
+    if (!betContractAddress || !tokenContractAddress) {
+      toast({
+        title: "Configuration Error",
+        description: "Contract addresses are not properly configured.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+      return;
+    }
+
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
-      const betContract = new ethers.Contract(
-        process.env.NEXT_PUBLIC_CONTRACT_ADDRESS!,
-        ChartsBetJson.abi,
-        signer,
-      );
+
+      const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, signer);
       const tokenContract = new ethers.Contract(
-        process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS!,
+        tokenContractAddress,
         ChartsBetTokenJson.abi,
         signer,
       );
 
-      // First, approve the ChartsBet contract to spend tokens
-      const betAmountWei = ethers.parseEther(betAmount);
-      const approveTx = await tokenContract.approve(
-        process.env.NEXT_PUBLIC_CONTRACT_ADDRESS!,
-        betAmountWei,
-      );
-      await approveTx.wait();
+      console.log("Connected to bet contract:", betContractAddress);
+      console.log("Connected to token contract:", tokenContractAddress);
 
-      // Then, place the bet
-      const betTx = await betContract.placeBet(
-        ethers.encodeBytes32String(selectedCountry),
-        ethers.encodeBytes32String(selectedArtist.artist),
-        betAmountWei,
-      );
-      await betTx.wait();
+      // Convert bet amount to Wei
+      const betAmountWei = ethers.parseEther(betAmount);
+      console.log("Bet amount in Wei:", betAmountWei.toString());
+
+      // Check if the bet amount exceeds the maximum allowed
+      const maxBet = await betContract.MAX_BET();
+      console.log("Maximum bet allowed:", ethers.formatEther(maxBet));
+      if (betAmountWei > maxBet) {
+        throw new Error("Bet amount exceeds the maximum allowed");
+      }
+
+      // Check token balance
+      const balance = await tokenContract.balanceOf(address);
+      console.log("Token balance:", ethers.formatEther(balance));
+      if (balance < betAmountWei) {
+        throw new Error("Insufficient token balance");
+      }
+
+      // Check and set allowance
+      const allowance = await tokenContract.allowance(address, betContractAddress);
+      console.log("Current allowance:", ethers.formatEther(allowance));
+      if (allowance < betAmountWei) {
+        console.log("Approving tokens...");
+        const approveTx = await tokenContract.approve(betContractAddress, betAmountWei);
+        await approveTx.wait();
+        console.log("Approval transaction completed");
+      }
+
+      // Get pool info before placing bet
+      await getPoolInfo(betContract, selectedCountry);
+
+      // Encode bet parameters
+      const encodedCountry = ethers.encodeBytes32String(selectedCountry);
+      const encodedArtist = ethers.encodeBytes32String(selectedArtist.artist);
+      console.log("Encoded country:", encodedCountry);
+      console.log("Encoded artist:", encodedArtist);
+
+      console.log("Placing bet...");
+      const betTx = await betContract.placeBet(encodedCountry, encodedArtist, betAmountWei);
+
+      console.log("Bet transaction sent:", betTx.hash);
+      const receipt = await betTx.wait();
+      console.log("Bet transaction receipt:", receipt);
+
+      if (receipt.status === 0) {
+        throw new Error("Transaction failed");
+      }
 
       toast({
         title: "Bet placed",
@@ -319,9 +393,11 @@ const BetForm: React.FC = () => {
       updateTokenBalance();
     } catch (error) {
       console.error("Error placing bet:", error);
+      const errorMessage = "An error occurred while placing your bet. Please try again.";
+
       toast({
         title: "Betting error",
-        description: "An error occurred while placing your bet. Please try again.",
+        description: errorMessage,
         status: "error",
         duration: 5000,
         isClosable: true,

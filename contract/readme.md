@@ -5,7 +5,14 @@ MusicChartsBet
 
 ---
 
-Deployed Addresses (09/09 - 08:43 - deployed with 0x33f606184DB331bEe688812054C019159f8a75d9)
+Deployed Addresses (09/09 - 12:53)
+
+ChartsBet#ChartsBet - 0xF51ac1c0C2E542722998E056082bC12f9cE707FA
+ChartsBetToken#ChartsBetToken - 0xED867b7EEca0D486A32d3Ba8D47ce0c8D14ACb87
+
+---
+
+Deployed Addresses (09/09 - 08:43)
 
 ChartsBet#ChartsBet - 0xf3f31B6b18Cb690DF0B16158655560a76F815f92
 ChartsBetToken#ChartsBetToken - 0xc4397A28Fe23B319378185f019aC10c30257E489
