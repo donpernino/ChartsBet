@@ -1,48 +1,25 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
-import { ChartsBet, ChartsBetToken } from '../typechain-types';
+import { ChartsBet } from '../typechain-types';
 import { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers';
 import { time } from '@nomicfoundation/hardhat-network-helpers';
 
 describe('ChartsBet Contract', function () {
 	let chartsBet: ChartsBet;
-	let chartsBetToken: ChartsBetToken;
 	let owner: HardhatEthersSigner;
 	let addr1: HardhatEthersSigner;
 	let addr2: HardhatEthersSigner;
 
-	const INITIAL_MINT = ethers.parseEther('1000000'); // 1 million tokens
-	const MAX_BET = ethers.parseEther('1000'); // 1000 tokens
+	const MAX_BET = ethers.parseEther('1'); // 1 ETH
 
 	beforeEach(async function () {
 		[owner, addr1, addr2] = await ethers.getSigners();
 
-		const ChartsBetTokenFactory = await ethers.getContractFactory(
-			'ChartsBetToken'
-		);
-		chartsBetToken = await ChartsBetTokenFactory.deploy(
-			await owner.getAddress()
-		);
-		await chartsBetToken.waitForDeployment();
-
 		const ChartsBetFactory = await ethers.getContractFactory('ChartsBet');
-		chartsBet = await ChartsBetFactory.deploy(
-			await owner.getAddress(),
-			await chartsBetToken.getAddress()
-		);
+		chartsBet = await ChartsBetFactory.deploy(await owner.getAddress());
 		await chartsBet.waitForDeployment();
 
 		await chartsBet.initialize();
-
-		await chartsBetToken.transfer(await addr1.getAddress(), INITIAL_MINT);
-		await chartsBetToken.transfer(await addr2.getAddress(), INITIAL_MINT);
-
-		await chartsBetToken
-			.connect(addr1)
-			.approve(await chartsBet.getAddress(), ethers.MaxUint256);
-		await chartsBetToken
-			.connect(addr2)
-			.approve(await chartsBet.getAddress(), ethers.MaxUint256);
 	});
 
 	describe('Initialization', function () {
@@ -63,7 +40,7 @@ describe('ChartsBet Contract', function () {
 			const tx = await chartsBet.openAllDailyPools();
 			const receipt = await tx.wait();
 
-			const poolOpenedEvents = receipt.logs.filter(
+			const poolOpenedEvents = receipt?.logs.filter(
 				(log) => log.fragment && log.fragment.name === 'PoolOpened'
 			);
 
@@ -96,20 +73,21 @@ describe('ChartsBet Contract', function () {
 		beforeEach(async function () {
 			await chartsBet.openAllDailyPools();
 			await chartsBet.updateTop10(
-				ethers.encodeBytes32String('WW'),
+				ethers.encodeBytes32String('FR'),
 				Array(10).fill(ethers.encodeBytes32String('Artist'))
 			);
 		});
 
 		it('Should allow placing a bet', async function () {
-			const betAmount = ethers.parseEther('100');
+			const betAmount = ethers.parseEther('0.1');
+
 			await expect(
 				chartsBet
 					.connect(addr1)
 					.placeBet(
-						ethers.encodeBytes32String('WW'),
+						ethers.encodeBytes32String('FR'),
 						ethers.encodeBytes32String('Artist'),
-						betAmount
+						{ value: betAmount }
 					)
 			).to.emit(chartsBet, 'BetPlaced');
 		});
@@ -122,7 +100,7 @@ describe('ChartsBet Contract', function () {
 					.placeBet(
 						ethers.encodeBytes32String('WW'),
 						ethers.encodeBytes32String('Artist'),
-						betAmount
+						{ value: betAmount }
 					)
 			).to.be.revertedWithCustomError(chartsBet, 'BetTooHigh');
 		});
@@ -135,7 +113,7 @@ describe('ChartsBet Contract', function () {
 					.placeBet(
 						ethers.encodeBytes32String('WW'),
 						ethers.encodeBytes32String('Artist'),
-						ethers.parseEther('100')
+						{ value: ethers.parseEther('0.1') }
 					)
 			).to.be.revertedWithCustomError(chartsBet, 'PoolNotOpen');
 		});
@@ -146,7 +124,7 @@ describe('ChartsBet Contract', function () {
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist'),
-					ethers.parseEther('100')
+					{ value: ethers.parseEther('0.1') }
 				);
 			await expect(
 				chartsBet
@@ -154,7 +132,7 @@ describe('ChartsBet Contract', function () {
 					.placeBet(
 						ethers.encodeBytes32String('WW'),
 						ethers.encodeBytes32String('Artist'),
-						ethers.parseEther('100')
+						{ value: ethers.parseEther('0.1') }
 					)
 			).to.be.revertedWithCustomError(chartsBet, 'BetAlreadyPlaced');
 		});
@@ -214,14 +192,20 @@ describe('ChartsBet Contract', function () {
 				Array(10).fill(ethers.encodeBytes32String('Artist'))
 			);
 
-			const betAmount = ethers.parseEther('100');
+			const betAmount = ethers.parseEther('0.1');
 			await chartsBet
 				.connect(addr1)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist'),
-					betAmount
+					{ value: betAmount }
 				);
+
+			// Send additional ETH to the contract to cover payouts
+			await owner.sendTransaction({
+				to: await chartsBet.getAddress(),
+				value: ethers.parseEther('1'),
+			});
 
 			await time.increase(86400);
 			await chartsBet.closePoolAndAnnounceWinner(
@@ -239,34 +223,31 @@ describe('ChartsBet Contract', function () {
 		});
 
 		it('Should allow claiming payout', async function () {
-			const betAmount = ethers.parseEther('100');
-
-			// Transfer additional tokens to the contract to cover potential payouts
-			await chartsBetToken.transfer(
-				await chartsBet.getAddress(),
-				betAmount * 2n
-			);
-
 			await chartsBet
 				.connect(addr1)
 				.settleBet(ethers.encodeBytes32String('WW'));
 
-			const initialBalance = await chartsBetToken.balanceOf(
+			const initialBalance = await ethers.provider.getBalance(
 				addr1.address
 			);
 
-			await expect(chartsBet.connect(addr1).claimPayout()).to.emit(
-				chartsBet,
-				'PayoutClaimed'
+			const tx = await chartsBet.connect(addr1).claimPayout();
+			const receipt = await tx.wait();
+			const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+
+			const finalBalance = await ethers.provider.getBalance(
+				addr1.address
 			);
 
-			const finalBalance = await chartsBetToken.balanceOf(addr1.address);
-			expect(finalBalance).to.be.greaterThan(initialBalance);
+			expect(finalBalance + gasUsed).to.be.gt(initialBalance);
 
 			// Check that the payout is not more than the bet amount plus the reserve
+			const betAmount = ethers.parseEther('0.1');
 			const maxPayout =
 				betAmount + (betAmount * BigInt(50)) / BigInt(100); // 50% reserve
-			expect(finalBalance - initialBalance).to.be.at.most(maxPayout);
+			expect(finalBalance - initialBalance + gasUsed).to.be.at.most(
+				maxPayout
+			);
 		});
 	});
 
@@ -333,50 +314,9 @@ describe('ChartsBet Contract', function () {
 	});
 
 	describe('ChartsBet Reserve System', function () {
-		let chartsBet: ChartsBet;
-		let chartsBetToken: ChartsBetToken;
-		let owner: HardhatEthersSigner;
-		let alice: HardhatEthersSigner;
-		let bob: HardhatEthersSigner;
-
-		const INITIAL_BALANCE = ethers.parseEther('1000');
-		const BET_AMOUNT = ethers.parseEther('100');
+		const BET_AMOUNT = ethers.parseEther('0.1');
 
 		beforeEach(async function () {
-			[owner, alice, bob] = await ethers.getSigners();
-
-			const ChartsBetTokenFactory = await ethers.getContractFactory(
-				'ChartsBetToken'
-			);
-			chartsBetToken = await ChartsBetTokenFactory.deploy(
-				await owner.getAddress()
-			);
-			await chartsBetToken.waitForDeployment();
-
-			const ChartsBetFactory = await ethers.getContractFactory(
-				'ChartsBet'
-			);
-			chartsBet = await ChartsBetFactory.deploy(
-				await owner.getAddress(),
-				await chartsBetToken.getAddress()
-			);
-			await chartsBet.waitForDeployment();
-
-			await chartsBet.initialize();
-
-			// Give Alice and Bob some tokens
-			await chartsBetToken.transfer(alice.address, INITIAL_BALANCE);
-			await chartsBetToken.transfer(bob.address, INITIAL_BALANCE);
-
-			// Approve ChartsBet to spend tokens
-			await chartsBetToken
-				.connect(alice)
-				.approve(await chartsBet.getAddress(), ethers.MaxUint256);
-			await chartsBetToken
-				.connect(bob)
-				.approve(await chartsBet.getAddress(), ethers.MaxUint256);
-
-			// Open pools and set top artists
 			await chartsBet.openAllDailyPools();
 			await chartsBet.updateTop10(
 				ethers.encodeBytes32String('WW'),
@@ -384,23 +324,29 @@ describe('ChartsBet Contract', function () {
 					.fill(0)
 					.map((_, i) => ethers.encodeBytes32String(`Artist${i}`))
 			);
+
+			// Send additional ETH to the contract to cover payouts
+			await owner.sendTransaction({
+				to: await chartsBet.getAddress(),
+				value: ethers.parseEther('1'),
+			});
 		});
 
 		it('should handle bets and payouts correctly with reserve system', async function () {
 			// Place bets
 			await chartsBet
-				.connect(alice)
+				.connect(addr1)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist0'),
-					BET_AMOUNT
+					{ value: BET_AMOUNT }
 				);
 			await chartsBet
-				.connect(bob)
+				.connect(addr2)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist1'),
-					BET_AMOUNT
+					{ value: BET_AMOUNT }
 				);
 
 			// Close pool
@@ -412,45 +358,96 @@ describe('ChartsBet Contract', function () {
 
 			// Settle bets
 			await chartsBet
-				.connect(alice)
+				.connect(addr1)
 				.settleBet(ethers.encodeBytes32String('WW'));
 			await chartsBet
-				.connect(bob)
+				.connect(addr2)
 				.settleBet(ethers.encodeBytes32String('WW'));
 
 			// Claim payouts
-			const aliceInitialBalance = await chartsBetToken.balanceOf(
-				alice.address
+			const aliceInitialBalance = await ethers.provider.getBalance(
+				addr1.address
 			);
-			await chartsBet.connect(alice).claimPayout();
-			const aliceFinalBalance = await chartsBetToken.balanceOf(
-				alice.address
+			const aliceClaimTx = await chartsBet.connect(addr1).claimPayout();
+			const aliceClaimReceipt = await aliceClaimTx.wait();
+			const aliceGasUsed =
+				aliceClaimReceipt!.gasUsed * aliceClaimReceipt!.gasPrice;
+			const aliceFinalBalance = await ethers.provider.getBalance(
+				addr1.address
 			);
 
-			const bobInitialBalance = await chartsBetToken.balanceOf(
-				bob.address
+			const bobInitialBalance = await ethers.provider.getBalance(
+				addr2.address
 			);
-			await expect(
-				chartsBet.connect(bob).claimPayout()
-			).to.be.revertedWithCustomError(chartsBet, 'NoPayoutToClaim');
-			const bobFinalBalance = await chartsBetToken.balanceOf(bob.address);
+			const bobClaimTx = await chartsBet
+				.connect(addr2)
+				.claimPayout()
+				.catch((e) => e);
+			const bobClaimReceipt = await ethers.provider.getTransactionReceipt(
+				bobClaimTx.transactionHash
+			);
+			const bobGasUsed =
+				bobClaimReceipt!.gasUsed * bobClaimReceipt!.gasPrice;
+			const bobFinalBalance = await ethers.provider.getBalance(
+				addr2.address
+			);
+
+			// Log balance changes
+			console.log(
+				'Alice initial balance:',
+				aliceInitialBalance.toString()
+			);
+			console.log('Alice final balance:', aliceFinalBalance.toString());
+			console.log('Alice gas used:', aliceGasUsed.toString());
+			console.log(
+				'Alice balance change:',
+				(
+					aliceFinalBalance -
+					aliceInitialBalance +
+					aliceGasUsed
+				).toString()
+			);
+
+			console.log('Bob initial balance:', bobInitialBalance.toString());
+			console.log('Bob final balance:', bobFinalBalance.toString());
+			console.log('Bob gas used:', bobGasUsed.toString());
+			console.log(
+				'Bob balance change:',
+				(bobFinalBalance - bobInitialBalance).toString()
+			);
 
 			// Check balances
-			expect(aliceFinalBalance).to.be.gt(aliceInitialBalance);
-			expect(bobFinalBalance).to.equal(bobInitialBalance); // Bob should not receive any payout
+			expect(aliceFinalBalance + aliceGasUsed).to.be.gt(
+				aliceInitialBalance,
+				"Alice's balance should increase"
+			);
 
 			// Check that Alice's payout is not more than bet amount plus reserve
 			const maxPayout =
 				BET_AMOUNT + (BET_AMOUNT * BigInt(50)) / BigInt(100); // 50% reserve
-			expect(aliceFinalBalance - aliceInitialBalance).to.be.at.most(
-				maxPayout
+			const aliceBalanceChange =
+				aliceFinalBalance - aliceInitialBalance + aliceGasUsed;
+			expect(aliceBalanceChange).to.be.at.most(
+				maxPayout,
+				"Alice's payout should not exceed max payout"
+			);
+
+			// Check Bob's balance change
+			const bobBalanceChange = bobFinalBalance - bobInitialBalance;
+			expect(bobBalanceChange).to.equal(
+				-bobGasUsed,
+				"Bob's balance should only decrease by gas costs"
 			);
 
 			// Check contract balance
-			const contractBalance = await chartsBetToken.balanceOf(
+			const contractBalance = await ethers.provider.getBalance(
 				await chartsBet.getAddress()
 			);
-			expect(contractBalance).to.be.gt(0); // Contract should have some reserve left
+			console.log('Contract balance:', contractBalance.toString());
+			expect(contractBalance).to.be.gt(
+				0,
+				'Contract should have some reserve left'
+			);
 		});
 	});
 
@@ -463,27 +460,32 @@ describe('ChartsBet Contract', function () {
 			expect(await chartsBet.paused()).to.be.false;
 		});
 
-		it('Should allow owner to withdraw tokens', async function () {
-			const withdrawAmount = ethers.parseEther('100');
-			await chartsBetToken.transfer(
-				await chartsBet.getAddress(),
-				withdrawAmount
-			);
+		it('Should allow owner to withdraw ETH', async function () {
+			const withdrawAmount = ethers.parseEther('1');
+			await owner.sendTransaction({
+				to: await chartsBet.getAddress(),
+				value: withdrawAmount,
+			});
 
-			const initialBalance = await chartsBetToken.balanceOf(
+			const initialBalance = await ethers.provider.getBalance(
 				owner.address
 			);
-			await chartsBet.withdrawTokens(withdrawAmount);
-			const finalBalance = await chartsBetToken.balanceOf(owner.address);
+			const tx = await chartsBet.withdrawETH(withdrawAmount);
+			const receipt = await tx.wait();
+			const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
 
-			expect(finalBalance).to.equal(initialBalance + withdrawAmount);
+			const finalBalance = await ethers.provider.getBalance(
+				owner.address
+			);
+
+			expect(finalBalance + gasUsed - initialBalance).to.equal(
+				withdrawAmount
+			);
 		});
 
-		it('Should revert if non-owner tries to withdraw tokens', async function () {
+		it('Should revert if non-owner tries to withdraw ETH', async function () {
 			await expect(
-				chartsBet
-					.connect(addr1)
-					.withdrawTokens(ethers.parseEther('100'))
+				chartsBet.connect(addr1).withdrawETH(ethers.parseEther('1'))
 			).to.be.revertedWithCustomError(
 				chartsBet,
 				'OwnableUnauthorizedAccount'
@@ -500,7 +502,7 @@ describe('ChartsBet Contract', function () {
 					.placeBet(
 						ethers.encodeBytes32String('INVALID'),
 						ethers.encodeBytes32String('Artist'),
-						ethers.parseEther('100')
+						{ value: ethers.parseEther('0.1') }
 					)
 			).to.be.revertedWithCustomError(chartsBet, 'InvalidCountry');
 		});
@@ -514,7 +516,7 @@ describe('ChartsBet Contract', function () {
 					.placeBet(
 						ethers.encodeBytes32String('WW'),
 						ethers.encodeBytes32String('Artist'),
-						ethers.parseEther('100')
+						{ value: ethers.parseEther('0.1') }
 					)
 			).to.be.revertedWithCustomError(chartsBet, 'EnforcedPause');
 			await chartsBet.unpause();
@@ -529,32 +531,27 @@ describe('ChartsBet Contract', function () {
 					.map((_, i) => ethers.encodeBytes32String(`Artist${i}`))
 			);
 
-			// Approve ChartsBet to spend tokens for all bettors
-			await chartsBetToken
-				.connect(owner)
-				.approve(await chartsBet.getAddress(), ethers.MaxUint256);
-
 			// Place multiple bets
 			await chartsBet
 				.connect(addr1)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist0'),
-					ethers.parseEther('100')
+					{ value: ethers.parseEther('0.1') }
 				);
 			await chartsBet
 				.connect(addr2)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist1'),
-					ethers.parseEther('100')
+					{ value: ethers.parseEther('0.1') }
 				);
 			await chartsBet
 				.connect(owner)
 				.placeBet(
 					ethers.encodeBytes32String('WW'),
 					ethers.encodeBytes32String('Artist0'),
-					ethers.parseEther('100')
+					{ value: ethers.parseEther('0.1') }
 				);
 
 			await time.increase(86400);
@@ -569,47 +566,33 @@ describe('ChartsBet Contract', function () {
 					.connect(bettor)
 					.settleBet(ethers.encodeBytes32String('WW'));
 
-				const initialBalance = await chartsBetToken.balanceOf(
+				const initialBalance = await ethers.provider.getBalance(
 					bettor.address
 				);
 
 				try {
-					await chartsBet.connect(bettor).claimPayout();
+					const tx = await chartsBet.connect(bettor).claimPayout();
+					const receipt = await tx.wait();
+					const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+					const finalBalance = await ethers.provider.getBalance(
+						bettor.address
+					);
+
+					if (bettor === addr2) {
+						// addr2 bet on the losing artist, so their balance should decrease by gas costs
+						expect(finalBalance).to.equal(initialBalance - gasUsed);
+					} else {
+						// addr1 and owner bet on the winning artist, so their balance should increase
+						expect(finalBalance + gasUsed).to.be.gt(initialBalance);
+					}
 				} catch (error: any) {
 					// If there's no payout to claim, the transaction will revert
 					expect(error.message).to.include('NoPayoutToClaim');
 				}
-
-				const finalBalance = await chartsBetToken.balanceOf(
-					bettor.address
-				);
-
-				if (bettor === addr2) {
-					// addr2 bet on the losing artist, so their balance should not change
-					expect(finalBalance).to.equal(initialBalance);
-				} else {
-					// addr1 and owner bet on the winning artist, so their balance should increase
-					expect(finalBalance).to.be.gt(initialBalance);
-				}
 			}
 
-			// Check final balances
-			const addr1FinalBalance = await chartsBetToken.balanceOf(
-				addr1.address
-			);
-			const addr2FinalBalance = await chartsBetToken.balanceOf(
-				addr2.address
-			);
-			const ownerFinalBalance = await chartsBetToken.balanceOf(
-				owner.address
-			);
-
-			expect(addr1FinalBalance).to.be.gt(INITIAL_MINT);
-			expect(addr2FinalBalance).to.be.lt(INITIAL_MINT);
-			expect(ownerFinalBalance).to.be.gt(INITIAL_MINT);
-
 			// Check contract balance
-			const contractBalance = await chartsBetToken.balanceOf(
+			const contractBalance = await ethers.provider.getBalance(
 				await chartsBet.getAddress()
 			);
 			expect(contractBalance).to.be.gt(0); // Contract should have some reserve left

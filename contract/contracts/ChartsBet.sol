@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     struct Bet {
@@ -26,11 +25,9 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     }
 
     uint256 public constant BET_DURATION = 1 days;
-    uint256 public constant MAX_BET = 1000 * 10 ** 18; // 1000 tokens, assuming 18 decimals
+    uint256 public constant MAX_BET = 1 ether; // 1 ETH
     uint256 public constant OUTSIDER_ODDS = 350; // 3.50 in basis points
     uint256 public constant RESERVE_PERCENTAGE = 50; // 50% of bets go to reserve
-
-    IERC20 public chartsBetToken;
 
     mapping(bytes32 => bool) public validCountries;
     mapping(bytes32 => mapping(uint256 => DailyBettingPool)) public dailyPools; // country => day => pool
@@ -55,7 +52,6 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     error InvalidArtistCount(uint256 count);
     error PoolNotClosed();
     error InsufficientContractBalance(uint256 required, uint256 available);
-    error TokenTransferFailed();
     error NoPayoutToClaim();
 
     event BetPlaced(
@@ -86,12 +82,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     );
     event PayoutClaimed(address indexed bettor, uint256 amount);
 
-    constructor(
-        address initialOwner,
-        address _chartsBetToken
-    ) Ownable(initialOwner) {
-        chartsBetToken = IERC20(_chartsBetToken);
-    }
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     function initialize() public initializer {
         bytes32[8] memory countries = [
@@ -141,9 +132,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
 
     function placeBet(
         bytes32 country,
-        bytes32 artist,
-        uint256 amount
-    ) external whenNotPaused nonReentrant {
+        bytes32 artist
+    ) external payable whenNotPaused nonReentrant {
         if (!validCountries[country]) revert InvalidCountry(country);
         DailyBettingPool storage pool = dailyPools[country][currentDay];
 
@@ -158,18 +148,21 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             );
         if (pool.bets[msg.sender].amount != 0)
             revert BetAlreadyPlaced(msg.sender);
-        if (amount > MAX_BET) revert BetTooHigh(amount, MAX_BET);
-
-        if (!chartsBetToken.transferFrom(msg.sender, address(this), amount)) {
-            revert TokenTransferFailed();
-        }
+        if (msg.value > MAX_BET) revert BetTooHigh(msg.value, MAX_BET);
 
         uint256 odds = getOdds(country, artist);
-        pool.bets[msg.sender] = Bet(msg.sender, artist, amount, odds);
+        pool.bets[msg.sender] = Bet(msg.sender, artist, msg.value, odds);
         pool.totalBets++;
-        pool.totalAmount += amount;
+        pool.totalAmount += msg.value;
 
-        emit BetPlaced(msg.sender, country, currentDay, artist, amount, odds);
+        emit BetPlaced(
+            msg.sender,
+            country,
+            currentDay,
+            artist,
+            msg.value,
+            odds
+        );
     }
 
     function closePoolAndAnnounceWinner(
@@ -218,9 +211,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
 
         pendingPayouts[msg.sender] = 0;
 
-        if (!chartsBetToken.transfer(msg.sender, payout)) {
-            revert TokenTransferFailed();
-        }
+        (bool sent, ) = payable(msg.sender).call{value: payout}("");
+        require(sent, "Failed to send ETH");
 
         emit PayoutClaimed(msg.sender, payout);
     }
@@ -255,10 +247,10 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         _unpause();
     }
 
-    function withdrawTokens(uint256 amount) external onlyOwner {
-        if (!chartsBetToken.transfer(owner(), amount)) {
-            revert TokenTransferFailed();
-        }
+    function withdrawETH(uint256 amount) external onlyOwner {
+        require(address(this).balance >= amount, "Not enough ETH in contract");
+        (bool sent, ) = payable(owner()).call{value: amount}("");
+        require(sent, "Failed to send ETH");
     }
 
     function getPoolInfo(
@@ -283,4 +275,6 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             pool.totalAmount
         );
     }
+
+    receive() external payable {}
 }
