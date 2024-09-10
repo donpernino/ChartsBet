@@ -5,6 +5,12 @@ MusicChartsBet
 
 ---
 
+Deployed Addresses (10/09 - 16:06)
+
+ChartsBet#ChartsBet - 0x534417B0Dc98bAec80AE906cC010B297ea422248
+
+---
+
 Deployed Addresses (09/09 - 12:53)
 
 ChartsBet#ChartsBet - 0xF51ac1c0C2E542722998E056082bC12f9cE707FA

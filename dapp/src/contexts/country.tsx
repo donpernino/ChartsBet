@@ -1,14 +1,16 @@
 import { createContext, useContext, useState, type FC, type ReactNode } from "react";
 
+import type { Country } from "../utils/constants";
+
 interface CountryContextProps {
-  selectedCountry: string;
-  setSelectedCountry: (country: string) => void;
+  selectedCountry: Country;
+  setSelectedCountry: (country: Country) => void;
 }
 
 const CountryContext = createContext<CountryContextProps | undefined>(undefined);
 
 export const CountryProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [selectedCountry, setSelectedCountry] = useState("FR");
+  const [selectedCountry, setSelectedCountry] = useState<Country>("FR");
 
   return (
     <CountryContext.Provider value={{ selectedCountry, setSelectedCountry }}>
