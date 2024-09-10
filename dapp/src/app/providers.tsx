@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider } from "wagmi";
 
 import { ArtistProvider } from "@/contexts/artist";
+import { BetPlacementProvider } from "@/contexts/betPlacement";
 import { CountryProvider } from "@/contexts/country";
 import { wagmiConfig } from "@/wagmi";
 
@@ -31,7 +32,9 @@ export function Providers({ children }: Readonly<{ children: ReactNode }>) {
           <ChakraProvider resetCSS theme={theme}>
             <RainbowKitProvider coolMode appInfo={appInfo}>
               <CountryProvider>
-                <ArtistProvider>{mounted && children}</ArtistProvider>
+                <ArtistProvider>
+                  <BetPlacementProvider>{mounted && children}</BetPlacementProvider>
+                </ArtistProvider>
               </CountryProvider>
             </RainbowKitProvider>
           </ChakraProvider>

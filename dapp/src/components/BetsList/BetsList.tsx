@@ -6,7 +6,6 @@ import { Box, Container, Heading, Text } from "@chakra-ui/react";
 
 import { BetCard } from "../BetCard";
 import CountryFlag from "../CountryFlag/CountryFlag";
-import { getCountry } from "@/utils/getCountryName";
 
 const BetsList: FC = () => {
   const userBets = JSON.parse(localStorage.getItem("bets") || "[]");
@@ -56,8 +55,15 @@ const BetsList: FC = () => {
                 <CountryFlag selectedCountry={countryBets[0].country} size={32} />
                 <Text whiteSpace="nowrap">Bets for {countryBets[0].country}</Text>
               </Heading>
-              {countryBets.map(({ title, amount, country, date }, index) => (
-                <BetCard key={index} artist={title} amount={amount} country={country} date={date} />
+              {countryBets.map(({ title, amount, country, date, odds }, index) => (
+                <BetCard
+                  key={index}
+                  artist={title}
+                  amount={amount}
+                  country={country}
+                  date={date}
+                  odds={odds}
+                />
               ))}
             </Box>
           );

@@ -20,3 +20,24 @@ export const getCountry = (country: Country) => {
       return "Worldwide";
   }
 };
+
+export const getCountryCode = (country: string) => {
+  switch (country) {
+    case "Brazil":
+      return "BR";
+    case "Germany":
+      return "DE";
+    case "Spain":
+      return "ES";
+    case "France":
+      return "FR";
+    case "Italy":
+      return "IT";
+    case "Portugal":
+      return "PT";
+    case "United States":
+      return "US";
+    case "Worldwide":
+      return "WW";
+  }
+};

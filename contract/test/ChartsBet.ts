@@ -92,6 +92,23 @@ describe('ChartsBet Contract', function () {
 			).to.emit(chartsBet, 'BetPlaced');
 		});
 
+		it('Should not allow bets after pool is closed', async function () {
+			await chartsBet.closePoolAndAnnounceWinner(
+				ethers.encodeBytes32String('FR'),
+				ethers.encodeBytes32String('Winner')
+			);
+
+			await expect(
+				chartsBet
+					.connect(addr1)
+					.placeBet(
+						ethers.encodeBytes32String('FR'),
+						ethers.encodeBytes32String('Artist'),
+						{ value: ethers.parseEther('0.1') }
+					)
+			).to.be.revertedWithCustomError(chartsBet, 'PoolNotOpen');
+		});
+
 		it('Should revert if bet is too high', async function () {
 			const betAmount = MAX_BET + 1n;
 			await expect(
@@ -143,8 +160,7 @@ describe('ChartsBet Contract', function () {
 			await chartsBet.openAllDailyPools();
 		});
 
-		it('Should close pool and announce winner', async function () {
-			await time.increase(86400);
+		it('Should close pool and announce winner at any time', async function () {
 			const currentDay = await chartsBet.currentDay();
 			await expect(
 				chartsBet.closePoolAndAnnounceWinner(
@@ -156,21 +172,25 @@ describe('ChartsBet Contract', function () {
 				.withArgs(
 					ethers.encodeBytes32String('WW'),
 					currentDay,
-					ethers.encodeBytes32String('Winner')
+					ethers.encodeBytes32String('Winner'),
+					await time.latest()
 				);
 		});
 
-		it('Should revert if pool is not ready to close', async function () {
-			await expect(
-				chartsBet.closePoolAndAnnounceWinner(
-					ethers.encodeBytes32String('WW'),
-					ethers.encodeBytes32String('Winner')
-				)
-			).to.be.revertedWithCustomError(chartsBet, 'PoolNotReadyToClose');
+		it('Should set actualClosingTime when closing the pool', async function () {
+			await chartsBet.closePoolAndAnnounceWinner(
+				ethers.encodeBytes32String('WW'),
+				ethers.encodeBytes32String('Winner')
+			);
+
+			const poolInfo = await chartsBet.getPoolInfo(
+				ethers.encodeBytes32String('WW')
+			);
+			expect(poolInfo.actualClosingTime).to.be.gt(0);
+			expect(poolInfo.actualClosingTime).to.be.lte(await time.latest());
 		});
 
 		it('Should revert if pool is already closed', async function () {
-			await time.increase(86400);
 			await chartsBet.closePoolAndAnnounceWinner(
 				ethers.encodeBytes32String('WW'),
 				ethers.encodeBytes32String('Winner')
@@ -568,6 +588,42 @@ describe('ChartsBet Contract', function () {
 				addr1.address
 			);
 			expect(hasBet).to.be.false;
+		});
+	});
+
+	describe('getPoolInfo', function () {
+		beforeEach(async function () {
+			await chartsBet.openAllDailyPools();
+		});
+
+		it('Should return correct pool info after opening', async function () {
+			const poolInfo = await chartsBet.getPoolInfo(
+				ethers.encodeBytes32String('WW')
+			);
+			expect(poolInfo.openingTime).to.be.gt(0);
+			expect(poolInfo.scheduledClosingTime).to.be.gt(
+				poolInfo.openingTime
+			);
+			expect(poolInfo.actualClosingTime).to.equal(0);
+			expect(poolInfo.closed).to.be.false;
+		});
+
+		it('Should return correct pool info after closing', async function () {
+			await chartsBet.closePoolAndAnnounceWinner(
+				ethers.encodeBytes32String('WW'),
+				ethers.encodeBytes32String('Winner')
+			);
+
+			const poolInfo = await chartsBet.getPoolInfo(
+				ethers.encodeBytes32String('WW')
+			);
+			expect(poolInfo.openingTime).to.be.gt(0);
+			expect(poolInfo.scheduledClosingTime).to.be.gt(
+				poolInfo.openingTime
+			);
+			expect(poolInfo.actualClosingTime).to.be.gt(0);
+			expect(poolInfo.actualClosingTime).to.be.lte(await time.latest());
+			expect(poolInfo.closed).to.be.true;
 		});
 	});
 

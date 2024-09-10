@@ -8,8 +8,6 @@ interface CountryFlagProps {
 }
 
 const CountryFlag: React.FC<CountryFlagProps> = ({ selectedCountry, size = 64 }) => {
-  console.log(selectedCountry);
-
   if (selectedCountry === "FR" || selectedCountry === "France") {
     return <FrFlag height={size} width={size} />;
   } else if (selectedCountry === "US" || selectedCountry === "United States") {

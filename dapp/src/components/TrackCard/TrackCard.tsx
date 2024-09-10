@@ -19,10 +19,12 @@ import { getFormattedOdds } from "@/utils/getFormattedOdds";
 
 type TrackCardProps = {
   track: Track;
+  betDisabled?: boolean;
 };
 
-const TrackCard: React.FC<TrackCardProps> = ({ track }) => {
+const TrackCard: React.FC<TrackCardProps> = ({ track, betDisabled = false }) => {
   const { setSelectedArtist } = useArtist();
+
   return (
     <Card
       direction={{ sm: "row" }}
@@ -79,6 +81,7 @@ const TrackCard: React.FC<TrackCardProps> = ({ track }) => {
           my="auto"
           variant="outline"
           colorScheme="black"
+          isDisabled={betDisabled}
           onClick={() =>
             setSelectedArtist({
               artist: track.artist,
@@ -86,7 +89,7 @@ const TrackCard: React.FC<TrackCardProps> = ({ track }) => {
             })
           }
         >
-          Bet on {track.artist}
+          {betDisabled ? "Already betted today" : `Bet on ${track.artist}`}
         </Button>
       </CardFooter>
     </Card>

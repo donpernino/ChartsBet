@@ -18,19 +18,16 @@ const config: HardhatUserConfig = {
 		amoy: {
 			url: `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 			accounts: [`0x${PRIVATE_KEY_0}`],
-			gas: 20000000,
-			gasPrice: 30000000000,
+			gas: 50000000,
+			gasPrice: 50000000000,
 			ignition: {
 				maxFeePerGasLimit: 50_000_000_000n,
-				maxPriorityFeePerGas: 2_000_000_000n,
+				maxPriorityFeePerGas: 3_000_000_0000n,
 			},
 		},
 		hardhat: {
 			allowUnlimitedContractSize: true,
 		},
-	},
-	ignition: {
-		requiredConfirmations: 1,
 	},
 	gasReporter: {
 		currency: 'EUR',

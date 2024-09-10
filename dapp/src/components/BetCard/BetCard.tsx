@@ -1,24 +1,11 @@
-import React, { useState } from "react";
-import { LinkIcon } from "@chakra-ui/icons";
-import {
-  Box,
-  Button,
-  Card,
-  CardBody,
-  CardFooter,
-  Image,
-  Link,
-  Text,
-  Tooltip,
-  useToast,
-} from "@chakra-ui/react";
+import React, { useState, useEffect } from "react";
+import { Box, Button, Card, CardBody, CardFooter, Text, Tooltip, useToast } from "@chakra-ui/react";
 import { ethers } from "ethers";
 import { ErrorDecoder } from "ethers-decode-error";
 import { useAccount, useWalletClient } from "wagmi";
 
 import ChartsBetJson from "../../../../contract/artifacts/contracts/ChartsBet.sol/ChartsBet.json";
-import { useCountry } from "@/contexts/country";
-import { getFormattedOdds } from "@/utils/getFormattedOdds";
+import { getCountryCode } from "@/utils/getCountryName";
 
 const errorDecoder = ErrorDecoder.create();
 
@@ -32,13 +19,39 @@ type BetCardProps = {
 
 const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [poolInfo, setPoolInfo] = useState<any>(null);
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { selectedCountry } = useCountry();
 
   const formattedDate = new Date(date).toLocaleDateString();
   const formattedTime = new Date(date).toLocaleTimeString();
+
+  useEffect(() => {
+    const fetchPoolInfo = async () => {
+      if (!address || !walletClient) return;
+
+      const betContractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+      if (!betContractAddress) {
+        console.error("Contract address is not properly configured.");
+        return;
+      }
+
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, provider);
+
+        const encodedCountry = ethers.encodeBytes32String(getCountryCode(country));
+        const info = await betContract.getPoolInfo(encodedCountry);
+
+        setPoolInfo(info);
+      } catch (error) {
+        console.error("Error fetching pool info:", error);
+      }
+    };
+
+    fetchPoolInfo();
+  }, [address, walletClient, country]);
 
   const handleClaimWinnings = async () => {
     if (!address || !walletClient) {
@@ -127,6 +140,40 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
     }
   };
 
+  const renderActionButton = () => {
+    if (!poolInfo) return null;
+
+    const betDate = new Date(date);
+    const poolOpenDate = new Date(Number(poolInfo.openingTime) * 1000);
+    const poolCloseDate = new Date(Number(poolInfo.closingTime) * 1000);
+
+    if (betDate.toDateString() !== poolOpenDate.toDateString()) {
+      return <Text color="red.500">Error. Contact support.</Text>;
+    }
+
+    if (!poolInfo.closed) {
+      return (
+        <Text>
+          Claim winnings at {poolCloseDate.toLocaleTimeString()} on{" "}
+          {poolCloseDate.toLocaleDateString()}
+        </Text>
+      );
+    }
+
+    return (
+      <Button
+        my="auto"
+        variant="outline"
+        colorScheme="black"
+        onClick={handleClaimWinnings}
+        isLoading={isLoading}
+        loadingText="Claiming..."
+      >
+        Claim winnings
+      </Button>
+    );
+  };
+
   return (
     <Card
       direction={{ sm: "row" }}
@@ -158,18 +205,7 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
           </Box>
         </Tooltip>
       </CardBody>
-      <CardFooter>
-        <Button
-          my="auto"
-          variant="outline"
-          colorScheme="black"
-          onClick={handleClaimWinnings}
-          isLoading={isLoading}
-          loadingText="Claiming..."
-        >
-          Claim winnings
-        </Button>
-      </CardFooter>
+      <CardFooter>{renderActionButton()}</CardFooter>
     </Card>
   );
 };

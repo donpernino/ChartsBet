@@ -27,6 +27,7 @@ import { useAccount, useWalletClient } from "wagmi";
 
 import ChartsBetJson from "../../../../contract/artifacts/contracts/ChartsBet.sol/ChartsBet.json";
 import { useArtist } from "@/contexts/artist";
+import { useBetPlacement } from "@/contexts/betPlacement";
 import { useCountry } from "@/contexts/country";
 import { getCountry } from "@/utils/getCountryName";
 import { getFormattedOdds } from "@/utils/getFormattedOdds";
@@ -38,13 +39,16 @@ interface BetInfo {
   amount: string;
   country: string;
   date: string;
+  odds: string;
 }
 
 const BetForm: React.FC = () => {
   const { selectedCountry } = useCountry();
   const { selectedArtist, setSelectedArtist } = useArtist();
+  const { checkBetPlaced } = useBetPlacement();
   const [betAmount, setBetAmount] = useState<string>("0.01");
   const [ethBalance, setEthBalance] = useState<string>("0");
+  const [hasBetPlaced, setHasBetPlaced] = useState<boolean>(false);
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -53,7 +57,15 @@ const BetForm: React.FC = () => {
     if (address) {
       updateEthBalance();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
+
+  useEffect(() => {
+    if (address) {
+      updateBetPlacedStatus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, selectedCountry]);
 
   const updateEthBalance = async () => {
     if (!address) return;
@@ -63,6 +75,13 @@ const BetForm: React.FC = () => {
       setEthBalance(ethers.formatEther(balance));
     } catch (error) {
       console.error("Error fetching ETH balance:", error);
+    }
+  };
+
+  const updateBetPlacedStatus = async () => {
+    if (address && selectedCountry) {
+      const betPlaced = await checkBetPlaced(address, selectedCountry);
+      setHasBetPlaced(betPlaced);
     }
   };
 
@@ -148,6 +167,7 @@ const BetForm: React.FC = () => {
         amount: betAmount,
         country: getCountry(selectedCountry),
         date: new Date().toISOString(),
+        odds: selectedArtist.odds,
       };
       storeBetInfo(betInfo);
 
@@ -159,6 +179,7 @@ const BetForm: React.FC = () => {
         isClosable: true,
       });
 
+      updateBetPlacedStatus();
       updateEthBalance();
     } catch (error) {
       console.error("Error placing bet:", error);
@@ -191,8 +212,6 @@ const BetForm: React.FC = () => {
       });
     }
   };
-
-  console.log(selectedArtist);
 
   return (
     <Container
@@ -277,8 +296,14 @@ const BetForm: React.FC = () => {
           )}
           <Spacer />
           <Text mr="4">Balance: {parseFloat(ethBalance).toFixed(4)} ETH</Text>
-          <Button size="md" variant="solid" leftIcon={<CheckIcon />} onClick={handleBet}>
-            Bet
+          <Button
+            size="md"
+            variant="solid"
+            leftIcon={<CheckIcon />}
+            onClick={handleBet}
+            isDisabled={hasBetPlaced}
+          >
+            {hasBetPlaced ? "Bet Already Placed" : "Bet"}
           </Button>
         </Flex>
       </FormControl>

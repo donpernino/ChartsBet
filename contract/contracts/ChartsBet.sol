@@ -16,7 +16,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
 
     struct DailyBettingPool {
         uint256 openingTime;
-        uint256 closingTime;
+        uint256 scheduledClosingTime;
+        uint256 actualClosingTime;
         mapping(address => Bet) bets;
         uint256 totalBets;
         uint256 totalAmount;
@@ -42,17 +43,16 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     error PoolNotOpen(
         uint256 currentTime,
         uint256 openingTime,
-        uint256 closingTime
+        uint256 actualClosingTime
     );
     error PoolAlreadyClosed();
     error BetAlreadyPlaced(address bettor);
     error BetTooHigh(uint256 amount, uint256 maxBet);
     error NoBetPlaced();
-    error PoolNotReadyToClose(uint256 currentTime, uint256 closingTime);
-    error InvalidArtistCount(uint256 count);
     error PoolNotClosed();
     error InsufficientContractBalance(uint256 required, uint256 available);
     error NoPayoutToClaim();
+    error InvalidArtistCount(uint256 count);
 
     event BetPlaced(
         address indexed bettor,
@@ -65,7 +65,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     event PoolClosed(
         bytes32 indexed country,
         uint256 indexed day,
-        bytes32 winningArtist
+        bytes32 winningArtist,
+        uint256 actualClosingTime
     );
     event BetSettled(
         address indexed bettor,
@@ -78,7 +79,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bytes32 indexed country,
         uint256 indexed day,
         uint256 openingTime,
-        uint256 closingTime
+        uint256 scheduledClosingTime
     );
     event PayoutClaimed(address indexed bettor, uint256 amount);
 
@@ -119,12 +120,12 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             DailyBettingPool storage pool = dailyPools[country][currentDay];
             if (pool.openingTime == 0) {
                 pool.openingTime = block.timestamp;
-                pool.closingTime = block.timestamp + BET_DURATION;
+                pool.scheduledClosingTime = block.timestamp + BET_DURATION;
                 emit PoolOpened(
                     country,
                     currentDay,
                     pool.openingTime,
-                    pool.closingTime
+                    pool.scheduledClosingTime
                 );
             }
         }
@@ -139,12 +140,13 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
 
         if (
             block.timestamp < pool.openingTime ||
-            block.timestamp >= pool.closingTime
+            block.timestamp >= pool.actualClosingTime ||
+            pool.closed
         )
             revert PoolNotOpen(
                 block.timestamp,
                 pool.openingTime,
-                pool.closingTime
+                pool.actualClosingTime
             );
         if (pool.bets[msg.sender].amount != 0)
             revert BetAlreadyPlaced(msg.sender);
@@ -170,14 +172,18 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bytes32 winningArtist
     ) external onlyOwner {
         DailyBettingPool storage pool = dailyPools[country][currentDay];
-        if (block.timestamp < pool.closingTime)
-            revert PoolNotReadyToClose(block.timestamp, pool.closingTime);
         if (pool.closed) revert PoolAlreadyClosed();
 
         pool.winningArtist = winningArtist;
         pool.closed = true;
+        pool.actualClosingTime = block.timestamp;
 
-        emit PoolClosed(country, currentDay, winningArtist);
+        emit PoolClosed(
+            country,
+            currentDay,
+            winningArtist,
+            pool.actualClosingTime
+        );
     }
 
     function settleBet(bytes32 country) external nonReentrant {
@@ -260,7 +266,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         view
         returns (
             uint256 openingTime,
-            uint256 closingTime,
+            uint256 scheduledClosingTime,
+            uint256 actualClosingTime,
             bool closed,
             uint256 totalBets,
             uint256 totalAmount
@@ -269,7 +276,8 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         DailyBettingPool storage pool = dailyPools[country][currentDay];
         return (
             pool.openingTime,
-            pool.closingTime,
+            pool.scheduledClosingTime,
+            pool.actualClosingTime,
             pool.closed,
             pool.totalBets,
             pool.totalAmount

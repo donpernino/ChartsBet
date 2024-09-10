@@ -1,7 +1,10 @@
-MusicChartsBet
+TODO : readme contract
 
--   L'utilisateur peut voter pour l'artiste qui va être le plus écouté de la semaine
--   Par genre
+---
+
+Deployed Addresses (11/09 - 00:59)
+
+ChartsBet#ChartsBet - 0xb50e3232557EA2Feb68c9EBe8447d748a103021c
 
 ---
 
