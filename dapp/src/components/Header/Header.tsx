@@ -5,6 +5,7 @@ import { Box, Container, Heading, theme } from "@chakra-ui/react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 import { useWindowSize } from "@/hooks/useWindowSize";
+import Link from "next/link";
 
 const Header: FC = () => {
   const { isTablet } = useWindowSize();
@@ -27,12 +28,20 @@ const Header: FC = () => {
         flexDirection="row"
       >
         {!isTablet && (
-          <Heading as="h1" fontSize="1.5rem" className="">
-            ChartsBet
-          </Heading>
+          <Link href="/">
+            <Heading as="h1" fontSize="1.5rem" className="">
+              ChartsBet
+            </Heading>
+          </Link>
         )}
-
-        <ConnectButton />
+        <Box display="flex" alignItems="center" gap="8">
+          <Link href="/bets">
+            <Heading as="h2" fontSize="1.1rem" fontWeight="medium" textDecoration="underline">
+              My bets
+            </Heading>
+          </Link>
+          <ConnectButton />
+        </Box>
       </Container>
     </Box>
   );

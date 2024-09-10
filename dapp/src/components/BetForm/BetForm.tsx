@@ -33,6 +33,13 @@ import { getFormattedOdds } from "@/utils/getFormattedOdds";
 
 const errorDecoder = ErrorDecoder.create();
 
+interface BetInfo {
+  title: string;
+  amount: string;
+  country: string;
+  date: string;
+}
+
 const BetForm: React.FC = () => {
   const { selectedCountry } = useCountry();
   const { selectedArtist, setSelectedArtist } = useArtist();
@@ -60,6 +67,12 @@ const BetForm: React.FC = () => {
   };
 
   const handleBetChange = () => setSelectedArtist(null);
+
+  const storeBetInfo = (betInfo: BetInfo) => {
+    const existingBets = JSON.parse(localStorage.getItem("bets") || "[]");
+    existingBets.push(betInfo);
+    localStorage.setItem("bets", JSON.stringify(existingBets));
+  };
 
   const handleBet = async () => {
     if (!selectedArtist || !betAmount || !walletClient || !address) {
@@ -129,6 +142,15 @@ const BetForm: React.FC = () => {
         throw new Error("Transaction failed");
       }
 
+      // Store bet information in local storage
+      const betInfo: BetInfo = {
+        title: `Bet on ${selectedArtist.artist}`,
+        amount: betAmount,
+        country: getCountry(selectedCountry),
+        date: new Date().toISOString(),
+      };
+      storeBetInfo(betInfo);
+
       toast({
         title: "Bet placed",
         description: `Your bet of ${betAmount} ETH on ${selectedArtist.artist} has been placed successfully.`,
@@ -169,6 +191,8 @@ const BetForm: React.FC = () => {
       });
     }
   };
+
+  console.log(selectedArtist);
 
   return (
     <Container

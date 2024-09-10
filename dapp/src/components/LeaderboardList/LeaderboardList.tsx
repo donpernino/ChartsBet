@@ -4,7 +4,7 @@ import { type FC, useEffect, useState } from "react";
 
 import { Box, Container, Select, Text } from "@chakra-ui/react";
 
-import { FrFlag, UsFlag, BrFlag, DeFlag, EsFlag, PtFlag, ItFlag } from "../Icons";
+import CountryFlag from "../CountryFlag/CountryFlag";
 import { TrackCard } from "../TrackCard";
 import { useCountry } from "@/contexts/country";
 import type { Leaderboard } from "@/types/leaderboard";
@@ -28,27 +28,6 @@ const LeaderboardList: FC = () => {
     setSelectedCountry(e.target.value);
   };
 
-  const CountryFlag = () => {
-    if (selectedCountry === "FR") {
-      return <FrFlag height={64} width={64} />;
-    } else if (selectedCountry === "US") {
-      return <UsFlag height={64} width={64} />;
-    } else if (selectedCountry === "BR") {
-      return <BrFlag height={64} width={64} />;
-    } else if (selectedCountry === "DE") {
-      return <DeFlag height={64} width={64} />;
-    } else if (selectedCountry === "ES") {
-      return <EsFlag height={64} width={64} />;
-    } else if (selectedCountry === "PT") {
-      return <PtFlag height={64} width={64} />;
-    } else if (selectedCountry === "IT") {
-      return <ItFlag height={64} width={64} />;
-    } else if (selectedCountry === "WW") {
-      return <Text>🌍</Text>;
-    }
-    return null;
-  };
-
   return (
     <>
       <Container maxW="1200px" pt={12} pb={48} gap="4" display="flex" flexDirection="column">
@@ -62,7 +41,7 @@ const LeaderboardList: FC = () => {
             gap="3"
             mr="auto"
           >
-            <CountryFlag />
+            <CountryFlag selectedCountry={selectedCountry} />
             <Text whiteSpace="nowrap">Daily Top Songs</Text>
             <Select
               value={selectedCountry}

@@ -276,5 +276,13 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         );
     }
 
+    function hasBetPlaced(
+        bytes32 country,
+        address bettor
+    ) public view returns (bool) {
+        DailyBettingPool storage pool = dailyPools[country][currentDay];
+        return pool.bets[bettor].amount != 0;
+    }
+
     receive() external payable {}
 }

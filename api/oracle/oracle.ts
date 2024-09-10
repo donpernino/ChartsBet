@@ -37,7 +37,7 @@ const contract = new ethers.Contract(
 	wallet
 );
 
-const test_countries: string[] = ['FR'];
+const test_countries: string[] = ['FR', 'US'];
 const prod_countries: string[] = [
 	'WW',
 	'BR',

@@ -493,6 +493,84 @@ describe('ChartsBet Contract', function () {
 		});
 	});
 
+	describe('hasBetPlaced', function () {
+		beforeEach(async function () {
+			await chartsBet.openAllDailyPools();
+			await chartsBet.updateTop10(
+				ethers.encodeBytes32String('FR'),
+				Array(10).fill(ethers.encodeBytes32String('Artist'))
+			);
+		});
+
+		it('Should return false for address that has not placed a bet', async function () {
+			const hasBet = await chartsBet.hasBetPlaced(
+				ethers.encodeBytes32String('FR'),
+				addr1.address
+			);
+			expect(hasBet).to.be.false;
+		});
+
+		it('Should return true for address that has placed a bet', async function () {
+			const betAmount = ethers.parseEther('0.1');
+			await chartsBet
+				.connect(addr1)
+				.placeBet(
+					ethers.encodeBytes32String('FR'),
+					ethers.encodeBytes32String('Artist'),
+					{ value: betAmount }
+				);
+
+			const hasBet = await chartsBet.hasBetPlaced(
+				ethers.encodeBytes32String('FR'),
+				addr1.address
+			);
+			expect(hasBet).to.be.true;
+		});
+
+		it('Should return false for different country even if bet placed', async function () {
+			const betAmount = ethers.parseEther('0.1');
+			await chartsBet
+				.connect(addr1)
+				.placeBet(
+					ethers.encodeBytes32String('FR'),
+					ethers.encodeBytes32String('Artist'),
+					{ value: betAmount }
+				);
+
+			const hasBet = await chartsBet.hasBetPlaced(
+				ethers.encodeBytes32String('WW'),
+				addr1.address
+			);
+			expect(hasBet).to.be.false;
+		});
+
+		it('Should return false after pool is closed and bet is settled', async function () {
+			const betAmount = ethers.parseEther('0.1');
+			await chartsBet
+				.connect(addr1)
+				.placeBet(
+					ethers.encodeBytes32String('FR'),
+					ethers.encodeBytes32String('Artist'),
+					{ value: betAmount }
+				);
+
+			await time.increase(86400); // Advance time by 1 day
+			await chartsBet.closePoolAndAnnounceWinner(
+				ethers.encodeBytes32String('FR'),
+				ethers.encodeBytes32String('Artist')
+			);
+			await chartsBet
+				.connect(addr1)
+				.settleBet(ethers.encodeBytes32String('FR'));
+
+			const hasBet = await chartsBet.hasBetPlaced(
+				ethers.encodeBytes32String('FR'),
+				addr1.address
+			);
+			expect(hasBet).to.be.false;
+		});
+	});
+
 	describe('Additional ChartsBet Tests', function () {
 		it('Should revert when placing bet for invalid country', async function () {
 			await chartsBet.openAllDailyPools();

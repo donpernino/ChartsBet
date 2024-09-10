@@ -29,6 +29,9 @@ const config: HardhatUserConfig = {
 			allowUnlimitedContractSize: true,
 		},
 	},
+	ignition: {
+		requiredConfirmations: 1,
+	},
 	gasReporter: {
 		currency: 'EUR',
 		L1: 'polygon',
