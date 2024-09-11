@@ -2,6 +2,12 @@ TODO : readme contract
 
 ---
 
+Deployed Addresses (11/09 - 13:16)
+
+ChartsBet#ChartsBet - 0x130a92Bc14E42744e59585D9AA174Eb3Eca03Ea0
+
+---
+
 Deployed Addresses (11/09 - 00:59)
 
 ChartsBet#ChartsBet - 0xb50e3232557EA2Feb68c9EBe8447d748a103021c

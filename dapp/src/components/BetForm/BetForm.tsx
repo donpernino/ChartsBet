@@ -49,6 +49,7 @@ const BetForm: React.FC = () => {
   const [betAmount, setBetAmount] = useState<string>("0.01");
   const [ethBalance, setEthBalance] = useState<string>("0");
   const [hasBetPlaced, setHasBetPlaced] = useState<boolean>(false);
+  const [poolInfo, setPoolInfo] = useState<any>(null); // <-- State for poolInfo
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -57,15 +58,57 @@ const BetForm: React.FC = () => {
     if (address) {
       updateEthBalance();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
 
   useEffect(() => {
     if (address) {
       updateBetPlacedStatus();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, selectedCountry]);
+
+  useEffect(() => {
+    console.log({ selectedCountry });
+
+    const fetchPoolInfo = async () => {
+      if (!selectedCountry) return;
+
+      const betContractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+      if (!betContractAddress) {
+        toast({
+          title: "Configuration Error",
+          description: "Contract address is not properly configured.",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+        const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, signer);
+
+        const encodedCountry = ethers.encodeBytes32String(selectedCountry);
+        const poolInfo = await betContract.getPoolInfo(encodedCountry);
+        setPoolInfo(poolInfo);
+      } catch (error) {
+        console.error("Error fetching pool info:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load betting pool information.",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+    };
+
+    fetchPoolInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCountry]);
+
+  console.log(poolInfo);
 
   const updateEthBalance = async () => {
     if (!address) return;
@@ -105,6 +148,17 @@ const BetForm: React.FC = () => {
       return;
     }
 
+    if (!poolInfo) {
+      toast({
+        title: "Pool info error",
+        description: "Betting pool information is not loaded.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+      return;
+    }
+
     const betContractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
     if (!betContractAddress) {
       toast({
@@ -136,7 +190,6 @@ const BetForm: React.FC = () => {
       const encodedCountry = ethers.encodeBytes32String(selectedCountry);
       const encodedArtist = ethers.encodeBytes32String(selectedArtist.artist);
 
-      const poolInfo = await betContract.getPoolInfo(encodedCountry);
       const currentTime = Math.floor(Date.now() / 1000);
       if (currentTime < poolInfo[0] || currentTime >= poolInfo[1]) {
         throw new Error("Betting pool is not open");

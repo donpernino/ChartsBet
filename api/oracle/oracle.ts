@@ -66,13 +66,26 @@ async function closeAllPoolsAndAnnounceWinners() {
 					`http://localhost:8080/daily-winner/${country}`
 				);
 				const winner = stringToBytes32(response.data);
+				console.log(
+					`Announcing winner for ${country}: ${response.data} -> ${winner}`
+				);
+
+				// Check if the pool is already closed
+				const pool = await contract.dailyPools(
+					stringToBytes32(country),
+					await contract.currentDay()
+				);
+				if (pool.closed) {
+					console.warn(`Pool for ${country} is already closed.`);
+					return; // Avoid trying to close it again
+				}
 
 				// Use the nonce + index to ensure unique nonces for each transaction
 				const tx = await contract.closePoolAndAnnounceWinner(
 					stringToBytes32(country),
 					winner,
 					{
-						gasLimit: 500000,
+						gasLimit: 1000000, // Increased gas limit
 						nonce: nonce + index,
 					}
 				);
@@ -83,11 +96,11 @@ async function closeAllPoolsAndAnnounceWinners() {
 				);
 
 				// Check if the pool is actually closed
-				const pool = await contract.dailyPools(
+				const updatedPool = await contract.dailyPools(
 					stringToBytes32(country),
 					await contract.currentDay()
 				);
-				if (!pool.closed) {
+				if (!updatedPool.closed) {
 					console.warn(
 						`Warning: Pool for ${country} may not have been closed successfully.`
 					);
@@ -113,7 +126,7 @@ async function closeAllPoolsAndAnnounceWinners() {
 async function openPoolsAndUpdateTop10() {
 	try {
 		console.log('Opening daily pools and updating top 10...');
-		const tx = await contract.openAllDailyPools({ gasLimit: 500000 });
+		const tx = await contract.openAllDailyPools({ gasLimit: 1000000 }); // Increased gas limit
 		const receipt = await tx.wait();
 		console.log(
 			`Opened all daily pools. Transaction hash: ${receipt.hash}`
@@ -135,8 +148,10 @@ async function updateTop10(country: string) {
 		);
 		const top10 = response.data.slice(0, 10).map(stringToBytes32);
 
+		console.log(`Updating top 10 for ${country}:`, top10);
+
 		const tx = await contract.updateTop10(stringToBytes32(country), top10, {
-			gasLimit: 500000,
+			gasLimit: 1000000, // Increased gas limit
 		});
 		const receipt = await tx.wait();
 		console.log(

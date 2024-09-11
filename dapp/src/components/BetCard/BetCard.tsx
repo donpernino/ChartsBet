@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+
 import { Box, Button, Card, CardBody, CardFooter, Text, Tooltip, useToast } from "@chakra-ui/react";
 import { ethers } from "ethers";
 import { ErrorDecoder } from "ethers-decode-error";
@@ -20,6 +21,7 @@ type BetCardProps = {
 const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [poolInfo, setPoolInfo] = useState<any>(null);
+  const [loadingPoolInfo, setLoadingPoolInfo] = useState(true); // To handle poolInfo loading
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -29,11 +31,16 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
 
   useEffect(() => {
     const fetchPoolInfo = async () => {
-      if (!address || !walletClient) return;
+      setLoadingPoolInfo(true); // Start loading
+      if (!address || !walletClient) {
+        setLoadingPoolInfo(false);
+        return;
+      }
 
       const betContractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
       if (!betContractAddress) {
         console.error("Contract address is not properly configured.");
+        setLoadingPoolInfo(false);
         return;
       }
 
@@ -47,11 +54,20 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
         setPoolInfo(info);
       } catch (error) {
         console.error("Error fetching pool info:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load pool information.",
+          status: "error",
+          duration: 5000,
+          isClosable: true,
+        });
+      } finally {
+        setLoadingPoolInfo(false); // Finish loading
       }
     };
 
     fetchPoolInfo();
-  }, [address, walletClient, country]);
+  }, [address, walletClient, country, toast]);
 
   const handleClaimWinnings = async () => {
     if (!address || !walletClient) {
@@ -141,12 +157,14 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
   };
 
   const renderActionButton = () => {
-    if (!poolInfo) return null;
+    if (loadingPoolInfo) return <Text>Loading pool information...</Text>;
+    if (!poolInfo) return <Text color="red.500">Failed to load pool info</Text>;
 
     const betDate = new Date(date);
     const poolOpenDate = new Date(Number(poolInfo.openingTime) * 1000);
-    const poolCloseDate = new Date(Number(poolInfo.closingTime) * 1000);
+    const poolCloseDate = new Date(Number(poolInfo.scheduledClosingTime) * 1000);
 
+    // Check if the pool open and bet date are mismatched
     if (betDate.toDateString() !== poolOpenDate.toDateString()) {
       return <Text color="red.500">Error. Contact support.</Text>;
     }

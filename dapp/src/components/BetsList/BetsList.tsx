@@ -3,6 +3,7 @@
 import { type FC } from "react";
 
 import { Box, Container, Heading, Text } from "@chakra-ui/react";
+import Link from "next/link";
 
 import { BetCard } from "../BetCard";
 import CountryFlag from "../CountryFlag/CountryFlag";
@@ -23,22 +24,22 @@ const BetsList: FC = () => {
   userBetsByCountry = Object.values(userBetsByCountry);
 
   return (
-    <>
-      <Container maxW="1200px" pt={12} pb={48} gap="4" display="flex" flexDirection="column">
-        <Box display="flex" flexDirection="column" gap="0">
-          <Box
-            display="flex"
-            flexDirection="row"
-            alignItems="center"
-            fontSize="4xl"
-            fontWeight="bold"
-            gap="3"
-            mr="auto"
-          >
-            <Text>My bets</Text>
-          </Box>
+    <Container maxW="1200px" pt={12} pb={48} gap="4" display="flex" flexDirection="column">
+      <Box display="flex" flexDirection="column" gap="0">
+        <Box
+          display="flex"
+          flexDirection="row"
+          alignItems="center"
+          fontSize="4xl"
+          fontWeight="bold"
+          gap="3"
+          mr="auto"
+        >
+          <Text>My bets</Text>
         </Box>
-        {userBetsByCountry.map((countryBets, countryIndex) => {
+      </Box>
+      {userBetsByCountry.length > 0 ? (
+        userBetsByCountry.map((countryBets, countryIndex) => {
           return (
             <Box key={countryIndex} mb="20">
               <Heading
@@ -67,9 +68,16 @@ const BetsList: FC = () => {
               ))}
             </Box>
           );
-        })}
-      </Container>
-    </>
+        })
+      ) : (
+        <>
+          <Text fontSize="lg">No bets placed yet...</Text>
+          <Link href="/">
+            <Text textDecoration="underline">Go back to leaderboard</Text>
+          </Link>
+        </>
+      )}
+    </Container>
   );
 };
 
