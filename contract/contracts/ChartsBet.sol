@@ -43,7 +43,12 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     error PoolNotOpen(
         uint256 currentTime,
         uint256 openingTime,
+        uint256 scheduledClosingTime,
         uint256 actualClosingTime
+    );
+    error PoolNotScheduledToClose(
+        uint256 currentTime,
+        uint256 scheduledClosingTime
     );
     error PoolAlreadyClosed();
     error BetAlreadyPlaced(address bettor);
@@ -121,6 +126,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             if (pool.openingTime == 0) {
                 pool.openingTime = block.timestamp;
                 pool.scheduledClosingTime = block.timestamp + BET_DURATION;
+                pool.actualClosingTime = pool.scheduledClosingTime; // Set actualClosingTime to scheduledClosingTime initially
                 emit PoolOpened(
                     country,
                     currentDay,
@@ -146,6 +152,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             revert PoolNotOpen(
                 block.timestamp,
                 pool.openingTime,
+                pool.scheduledClosingTime,
                 pool.actualClosingTime
             );
         if (pool.bets[msg.sender].amount != 0)
