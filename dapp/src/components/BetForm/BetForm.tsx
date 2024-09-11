@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 
-import { CheckIcon } from "@chakra-ui/icons";
+import { CheckIcon, InfoIcon } from "@chakra-ui/icons";
 import {
   Box,
   Button,
@@ -20,6 +20,7 @@ import {
   Flex,
   Spacer,
   useToast,
+  Progress,
 } from "@chakra-ui/react";
 import { ethers } from "ethers";
 import { ErrorDecoder } from "ethers-decode-error";
@@ -49,7 +50,8 @@ const BetForm: React.FC = () => {
   const [betAmount, setBetAmount] = useState<string>("0.01");
   const [ethBalance, setEthBalance] = useState<string>("0");
   const [hasBetPlaced, setHasBetPlaced] = useState<boolean>(false);
-  const [poolInfo, setPoolInfo] = useState<any>(null); // <-- State for poolInfo
+  const [poolInfo, setPoolInfo] = useState<any>(null);
+  const [timeLeft, setTimeLeft] = useState<string>("");
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -67,8 +69,6 @@ const BetForm: React.FC = () => {
   }, [address, selectedCountry]);
 
   useEffect(() => {
-    console.log({ selectedCountry });
-
     const fetchPoolInfo = async () => {
       if (!selectedCountry) return;
 
@@ -92,6 +92,18 @@ const BetForm: React.FC = () => {
         const encodedCountry = ethers.encodeBytes32String(selectedCountry);
         const poolInfo = await betContract.getPoolInfo(encodedCountry);
         setPoolInfo(poolInfo);
+
+        // Log poolInfo in a human-readable format
+        const readablePoolInfo = {
+          openingTime: new Date(Number(poolInfo[0]) * 1000).toLocaleString(),
+          scheduledClosingTime: new Date(Number(poolInfo[1]) * 1000).toLocaleString(),
+          actualClosingTime: new Date(Number(poolInfo[2]) * 1000).toLocaleString(),
+          closed: poolInfo[3],
+          totalBets: poolInfo[4].toString(),
+          totalAmount: ethers.formatEther(poolInfo[5]) + " ETH",
+        };
+
+        console.log("Pool Info:", readablePoolInfo);
       } catch (error) {
         console.error("Error fetching pool info:", error);
         toast({
@@ -105,10 +117,34 @@ const BetForm: React.FC = () => {
     };
 
     fetchPoolInfo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCountry]);
 
-  console.log(poolInfo);
+    // Set up periodic refresh
+    const intervalId = setInterval(fetchPoolInfo, 60000); // Refresh every minute
+
+    return () => clearInterval(intervalId);
+  }, [selectedCountry, toast]);
+
+  useEffect(() => {
+    if (poolInfo) {
+      const timer = setInterval(() => {
+        const now = Math.floor(Date.now() / 1000);
+        const closing = Number(poolInfo[1]);
+        const difference = closing - now;
+
+        if (difference > 0) {
+          const hours = Math.floor(difference / 3600);
+          const minutes = Math.floor((difference % 3600) / 60);
+          const seconds = difference % 60;
+          setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+        } else {
+          setTimeLeft("Closed");
+          clearInterval(timer);
+        }
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [poolInfo]);
 
   const updateEthBalance = async () => {
     if (!address) return;
@@ -176,6 +212,19 @@ const BetForm: React.FC = () => {
       const signer = await provider.getSigner();
       const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, signer);
 
+      // Check if the current pool is closed
+      if (poolInfo[3]) {
+        // Refresh pool info
+        const encodedCountry = ethers.encodeBytes32String(selectedCountry);
+        const freshPoolInfo = await betContract.getPoolInfo(encodedCountry);
+        setPoolInfo(freshPoolInfo);
+
+        // If the new pool is also closed, throw an error
+        if (freshPoolInfo[3]) {
+          throw new Error("Betting pool is currently closed");
+        }
+      }
+
       const betAmountWei = ethers.parseEther(betAmount);
       const maxBet = await betContract.MAX_BET();
       if (betAmountWei > maxBet) {
@@ -209,31 +258,39 @@ const BetForm: React.FC = () => {
         value: betAmountWei,
       });
 
-      const receipt = await betTx.wait();
-      if (receipt.status === 0) {
-        throw new Error("Transaction failed");
-      }
-
-      // Store bet information in local storage
-      const betInfo: BetInfo = {
-        title: `Bet on ${selectedArtist.artist}`,
-        amount: betAmount,
-        country: getCountry(selectedCountry),
-        date: new Date().toISOString(),
-        odds: selectedArtist.odds,
-      };
-      storeBetInfo(betInfo);
-
       toast({
-        title: "Bet placed",
-        description: `Your bet of ${betAmount} ETH on ${selectedArtist.artist} has been placed successfully.`,
-        status: "success",
+        title: "Bet Pending",
+        description: "Your bet is being processed. Please wait for confirmation.",
+        status: "info",
         duration: 5000,
         isClosable: true,
       });
 
-      updateBetPlacedStatus();
-      updateEthBalance();
+      const receipt = await betTx.wait();
+      if (receipt.status === 1) {
+        // Store bet information in local storage
+        const betInfo: BetInfo = {
+          title: `Bet on ${selectedArtist.artist}`,
+          amount: betAmount,
+          country: getCountry(selectedCountry),
+          date: new Date().toISOString(),
+          odds: selectedArtist.odds,
+        };
+        storeBetInfo(betInfo);
+
+        toast({
+          title: "Bet Placed",
+          description: `Your bet of ${betAmount} ETH on ${selectedArtist.artist} has been placed successfully.`,
+          status: "success",
+          duration: 5000,
+          isClosable: true,
+        });
+
+        updateBetPlacedStatus();
+        updateEthBalance();
+      } else {
+        throw new Error("Transaction failed");
+      }
     } catch (error) {
       console.error("Error placing bet:", error);
       let errorMessage = "An error occurred while placing your bet. Please try again.";
@@ -248,6 +305,8 @@ const BetForm: React.FC = () => {
         } else if (error.message.includes("execution reverted")) {
           errorMessage =
             "Transaction reverted. This could be due to contract conditions not being met.";
+        } else if (error.message.includes("Betting pool is currently closed")) {
+          errorMessage = "The betting pool for today is currently closed. Please try again later.";
         }
       }
 
@@ -257,7 +316,7 @@ const BetForm: React.FC = () => {
       }
 
       toast({
-        title: "Betting error",
+        title: "Betting Error",
         description: errorMessage,
         status: "error",
         duration: 5000,
@@ -330,7 +389,13 @@ const BetForm: React.FC = () => {
           </NumberInput>
         </Flex>
 
-        <Flex flexDirection="row" alignItems="center" justifyContent="space-between" w="100%">
+        <Flex
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="space-between"
+          w="100%"
+          mt="4"
+        >
           {selectedArtist && (
             <Tooltip label="Current betting odds" aria-label="Betting odds">
               <Box
@@ -354,11 +419,31 @@ const BetForm: React.FC = () => {
             variant="solid"
             leftIcon={<CheckIcon />}
             onClick={handleBet}
-            isDisabled={hasBetPlaced}
+            isDisabled={hasBetPlaced || (poolInfo && poolInfo[3])}
           >
-            {hasBetPlaced ? "Bet Already Placed" : "Bet"}
+            {hasBetPlaced ? "Bet Already Placed" : poolInfo && poolInfo[3] ? "Pool Closed" : "Bet"}
           </Button>
         </Flex>
+
+        {poolInfo && (
+          <Box mt="4" w="100%">
+            <Flex justifyContent="space-between" alignItems="center">
+              <Text fontSize="sm">Pool closes in: {timeLeft}</Text>
+              <Tooltip label="Total amount bet in this pool" aria-label="Total pool amount">
+                <Flex alignItems="center">
+                  <InfoIcon mr="2" />
+                  <Text fontSize="sm">Pool: {ethers.formatEther(poolInfo[5])} ETH</Text>
+                </Flex>
+              </Tooltip>
+            </Flex>
+            <Progress
+              value={(Number(poolInfo[4]) / 100) * 100}
+              size="sm"
+              colorScheme="green"
+              mt="2"
+            />
+          </Box>
+        )}
       </FormControl>
     </Container>
   );

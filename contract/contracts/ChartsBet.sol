@@ -25,7 +25,6 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         bool closed;
     }
 
-    uint256 public constant BET_DURATION = 1 days;
     uint256 public constant MAX_BET = 1 ether; // 1 ETH
     uint256 public constant OUTSIDER_ODDS = 350; // 3.50 in basis points
     uint256 public constant RESERVE_PERCENTAGE = 50; // 50% of bets go to reserve
@@ -36,6 +35,7 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
     mapping(bytes32 => mapping(bytes32 => uint256)) public artistRanks;
     mapping(address => uint256) public pendingPayouts;
 
+    uint256 public defaultDuration = 1 days; // Default duration, can be changed by owner
     uint256 public currentDay;
 
     // Custom errors
@@ -107,7 +107,11 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
         }
     }
 
-    function openAllDailyPools() external onlyOwner {
+    function setDefaultDuration(uint256 _duration) external onlyOwner {
+        defaultDuration = _duration;
+    }
+
+    function openAllDailyPools(uint256 _duration) external onlyOwner {
         currentDay = block.timestamp / 1 days;
         bytes32[8] memory countries = [
             bytes32("WW"),
@@ -125,8 +129,10 @@ contract ChartsBet is Ownable, Pausable, ReentrancyGuard, Initializable {
             DailyBettingPool storage pool = dailyPools[country][currentDay];
             if (pool.openingTime == 0) {
                 pool.openingTime = block.timestamp;
-                pool.scheduledClosingTime = block.timestamp + BET_DURATION;
-                pool.actualClosingTime = pool.scheduledClosingTime; // Set actualClosingTime to scheduledClosingTime initially
+                pool.scheduledClosingTime =
+                    block.timestamp +
+                    (_duration > 0 ? _duration : defaultDuration);
+                pool.actualClosingTime = pool.scheduledClosingTime;
                 emit PoolOpened(
                     country,
                     currentDay,

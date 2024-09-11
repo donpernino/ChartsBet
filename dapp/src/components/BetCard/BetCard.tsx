@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-
 import { Box, Button, Card, CardBody, CardFooter, Text, Tooltip, useToast } from "@chakra-ui/react";
 import { ethers } from "ethers";
 import { ErrorDecoder } from "ethers-decode-error";
@@ -22,6 +21,7 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
   const [isLoading, setIsLoading] = useState(false);
   const [poolInfo, setPoolInfo] = useState<any>(null);
   const [loadingPoolInfo, setLoadingPoolInfo] = useState(true); // To handle poolInfo loading
+  const [pendingPayout, setPendingPayout] = useState<string>("0"); // To store pending payout
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -29,8 +29,9 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
   const formattedDate = new Date(date).toLocaleDateString();
   const formattedTime = new Date(date).toLocaleTimeString();
 
+  // Fetch pool info and pending payouts
   useEffect(() => {
-    const fetchPoolInfo = async () => {
+    const fetchPoolInfoAndPayout = async () => {
       setLoadingPoolInfo(true); // Start loading
       if (!address || !walletClient) {
         setLoadingPoolInfo(false);
@@ -49,14 +50,20 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
         const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, provider);
 
         const encodedCountry = ethers.encodeBytes32String(getCountryCode(country));
-        const info = await betContract.getPoolInfo(encodedCountry);
 
+        // Fetch pool info
+        const info = await betContract.getPoolInfo(encodedCountry);
         setPoolInfo(info);
+
+        // Fetch pending payout for the user
+        const payout = await betContract.pendingPayouts(address);
+
+        setPendingPayout(ethers.formatEther(payout));
       } catch (error) {
-        console.error("Error fetching pool info:", error);
+        console.error("Error fetching pool info or payout:", error);
         toast({
           title: "Error",
-          description: "Failed to load pool information.",
+          description: "Failed to load pool information or pending payout.",
           status: "error",
           duration: 5000,
           isClosable: true,
@@ -66,10 +73,10 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
       }
     };
 
-    fetchPoolInfo();
+    fetchPoolInfoAndPayout();
   }, [address, walletClient, country, toast]);
 
-  const handleClaimWinnings = async () => {
+  const handleClaimPayout = async () => {
     if (!address || !walletClient) {
       toast({
         title: "Wallet not connected",
@@ -100,20 +107,8 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
       const signer = await provider.getSigner();
       const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, signer);
 
-      const encodedCountry = ethers.encodeBytes32String(country);
-
-      const feeData = await provider.getFeeData();
-      const gasPrice = feeData.gasPrice;
-
-      const gasEstimate = await betContract.settleBet.estimateGas(encodedCountry);
-      const gasLimit = (gasEstimate * 120n) / 100n;
-
-      const settleTx = await betContract.settleBet(encodedCountry, {
-        gasPrice,
-        gasLimit,
-      });
-
-      const receipt = await settleTx.wait();
+      const claimTx = await betContract.claimPayout();
+      const receipt = await claimTx.wait();
       if (receipt.status === 0) {
         throw new Error("Transaction failed");
       }
@@ -125,19 +120,13 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
         duration: 5000,
         isClosable: true,
       });
-    } catch (error) {
-      console.error("Error claiming winnings:", error);
-      let errorMessage = "An error occurred while claiming your winnings. Please try again.";
 
-      if (error instanceof Error) {
-        if (error.message.includes("user rejected")) {
-          errorMessage =
-            "Transaction was rejected. Please try again and confirm the transaction in your wallet.";
-        } else if (error.message.includes("execution reverted")) {
-          errorMessage =
-            "Transaction reverted. This could be due to contract conditions not being met.";
-        }
-      }
+      // Refresh pending payout after claim
+      const updatedPayout = await betContract.pendingPayouts(address);
+      setPendingPayout(ethers.formatEther(updatedPayout));
+    } catch (error) {
+      console.error("Error claiming payout:", error);
+      let errorMessage = "An error occurred while claiming your winnings. Please try again.";
 
       const decodedError = await errorDecoder.decode(error);
       if (decodedError.reason) {
@@ -164,6 +153,9 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
     const poolOpenDate = new Date(Number(poolInfo.openingTime) * 1000);
     const poolCloseDate = new Date(Number(poolInfo.scheduledClosingTime) * 1000);
 
+    // Log pool info
+    console.log(poolInfo);
+
     // Check if the pool open and bet date are mismatched
     if (betDate.toDateString() !== poolOpenDate.toDateString()) {
       return <Text color="red.500">Error. Contact support.</Text>;
@@ -178,16 +170,20 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
       );
     }
 
+    if (pendingPayout === "0") {
+      return <Text color="red.500">No pending payout to claim</Text>; // Add handling for no payouts
+    }
+
     return (
       <Button
         my="auto"
         variant="outline"
         colorScheme="black"
-        onClick={handleClaimWinnings}
+        onClick={handleClaimPayout}
         isLoading={isLoading}
         loadingText="Claiming..."
       >
-        Claim winnings
+        Claim winnings ({pendingPayout} ETH)
       </Button>
     );
   };

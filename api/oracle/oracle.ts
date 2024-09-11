@@ -123,10 +123,14 @@ async function closeAllPoolsAndAnnounceWinners() {
 	}
 }
 
-async function openPoolsAndUpdateTop10() {
+async function openPoolsAndUpdateTop10(duration: number = 0) {
 	try {
-		console.log('Opening daily pools and updating top 10...');
-		const tx = await contract.openAllDailyPools({ gasLimit: 1000000 }); // Increased gas limit
+		console.log(
+			`Opening daily pools with duration ${duration} seconds and updating top 10...`
+		);
+		const tx = await contract.openAllDailyPools(duration, {
+			gasLimit: 1000000,
+		});
 		const receipt = await tx.wait();
 		console.log(
 			`Opened all daily pools. Transaction hash: ${receipt.hash}`
@@ -162,9 +166,19 @@ async function updateTop10(country: string) {
 	}
 }
 
-async function runDailyTasks() {
+async function runDailyTasks(duration: number = 0) {
 	await closeAllPoolsAndAnnounceWinners();
-	await openPoolsAndUpdateTop10();
+	await openPoolsAndUpdateTop10(duration);
+}
+
+async function setDefaultDuration(duration: number) {
+	try {
+		const tx = await contract.setDefaultDuration(duration);
+		await tx.wait();
+		console.log(`Default duration set to ${duration} seconds`);
+	} catch (error) {
+		console.error('Error setting default duration:', error);
+	}
 }
 
 async function main() {
@@ -179,15 +193,31 @@ async function main() {
 			return;
 		}
 
+		// Set default duration to 5 minutes for testing
+		await setDefaultDuration(300); // 300 seconds = 5 minutes
+
 		console.log('Starting daily tasks...');
-		await runDailyTasks();
+		await runDailyTasks(300); // Open pools with 5-minute duration for testing
 		console.log('Daily tasks completed.');
 
-		cron.schedule('0 0 * * *', runDailyTasks);
+		// Schedule daily tasks to run every day at midnight
+		cron.schedule('0 0 * * *', () => runDailyTasks(0)); // Use default duration (1 day) in production
+
 		console.log('Oracle started, waiting for scheduled executions...');
 	} catch (error) {
 		console.error('Error in main function:', error);
 	}
 }
 
-main().catch(console.error);
+// Function to manually trigger tasks (useful for testing)
+async function manualTrigger(duration: number = 0) {
+	console.log('Manually triggering tasks...');
+	await runDailyTasks(duration);
+	console.log('Manual tasks completed.');
+}
+
+// main().catch(console.error);
+
+manualTrigger(300).catch(console.error);
+
+export { main, manualTrigger };
