@@ -20,8 +20,9 @@ type BetCardProps = {
 const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [poolInfo, setPoolInfo] = useState<any>(null);
-  const [loadingPoolInfo, setLoadingPoolInfo] = useState(true); // To handle poolInfo loading
-  const [pendingPayout, setPendingPayout] = useState<string>("0"); // To store pending payout
+  const [loadingPoolInfo, setLoadingPoolInfo] = useState(true);
+  const [pendingPayout, setPendingPayout] = useState<string>("0");
+  const [currentBlockTime, setCurrentBlockTime] = useState<number>(0);
   const toast = useToast();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -29,10 +30,10 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
   const formattedDate = new Date(date).toLocaleDateString();
   const formattedTime = new Date(date).toLocaleTimeString();
 
-  // Fetch pool info and pending payouts
+  // Fetch pool info, pending payout, and current block time
   useEffect(() => {
     const fetchPoolInfoAndPayout = async () => {
-      setLoadingPoolInfo(true); // Start loading
+      setLoadingPoolInfo(true);
       if (!address || !walletClient) {
         setLoadingPoolInfo(false);
         return;
@@ -51,14 +52,20 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
 
         const encodedCountry = ethers.encodeBytes32String(getCountryCode(country));
 
-        // Fetch pool info
-        const info = await betContract.getPoolInfo(encodedCountry);
+        // Fetch current day from the contract
+        const currentDay = await betContract.currentDay();
+
+        // Fetch pool info for the specific country and current day
+        const info = await betContract.dailyPools(encodedCountry, currentDay);
         setPoolInfo(info);
 
         // Fetch pending payout for the user
         const payout = await betContract.pendingPayouts(address);
-
         setPendingPayout(ethers.formatEther(payout));
+
+        // Fetch the current block timestamp
+        const block = await provider.getBlock("latest");
+        setCurrentBlockTime(block.timestamp * 1000); // Convert to milliseconds
       } catch (error) {
         console.error("Error fetching pool info or payout:", error);
         toast({
@@ -69,18 +76,18 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
           isClosable: true,
         });
       } finally {
-        setLoadingPoolInfo(false); // Finish loading
+        setLoadingPoolInfo(false);
       }
     };
 
     fetchPoolInfoAndPayout();
   }, [address, walletClient, country, toast]);
 
-  const handleClaimPayout = async () => {
+  const handleSettleBet = async () => {
     if (!address || !walletClient) {
       toast({
         title: "Wallet not connected",
-        description: "Please connect your wallet to claim winnings.",
+        description: "Please connect your wallet to settle the bet.",
         status: "error",
         duration: 5000,
         isClosable: true,
@@ -106,11 +113,83 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, signer);
+      const encodedCountry = ethers.encodeBytes32String(getCountryCode(country));
+
+      // Call settleBet to calculate the payout
+      const settleTx = await betContract.settleBet(encodedCountry);
+      const receipt = await settleTx.wait();
+      if (receipt.status === 0) {
+        throw new Error("Settle transaction failed");
+      }
+
+      // Refresh pending payout after settling the bet
+      const updatedPayout = await betContract.pendingPayouts(address);
+      setPendingPayout(ethers.formatEther(updatedPayout));
+
+      toast({
+        title: "Bet settled",
+        description: "Your bet has been settled and winnings calculated.",
+        status: "success",
+        duration: 5000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error("Error settling bet:", error);
+      let errorMessage = "An error occurred while settling the bet. Please try again.";
+
+      const decodedError = await errorDecoder.decode(error);
+      if (decodedError.reason) {
+        errorMessage = `Error: ${decodedError.reason}`;
+      }
+
+      toast({
+        title: "Settle error",
+        description: errorMessage,
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClaimPayout = async () => {
+    if (!address || !walletClient) {
+      toast({
+        title: "Wallet not connected",
+        description: "Please connect your wallet to claim winnings.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+
+      return;
+    }
+
+    const betContractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+    if (!betContractAddress) {
+      toast({
+        title: "Configuration Error",
+        description: "Contract address is not properly configured.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const betContract = new ethers.Contract(betContractAddress, ChartsBetJson.abi, signer);
 
       const claimTx = await betContract.claimPayout();
       const receipt = await claimTx.wait();
       if (receipt.status === 0) {
-        throw new Error("Transaction failed");
+        throw new Error("Claim transaction failed");
       }
 
       toast({
@@ -145,46 +224,31 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
     }
   };
 
-  const renderActionButton = () => {
+  const renderActionButtons = () => {
     if (loadingPoolInfo) return <Text>Loading pool information...</Text>;
     if (!poolInfo) return <Text color="red.500">Failed to load pool info</Text>;
 
-    const betDate = new Date(date);
-    const poolOpenDate = new Date(Number(poolInfo.openingTime) * 1000);
-    const poolCloseDate = new Date(Number(poolInfo.scheduledClosingTime) * 1000);
-
-    // Log pool info
-    console.log(poolInfo);
-
-    // Check if the pool open and bet date are mismatched
-    if (betDate.toDateString() !== poolOpenDate.toDateString()) {
-      return <Text color="red.500">Error. Contact support.</Text>;
-    }
-
-    if (!poolInfo.closed) {
-      return (
-        <Text>
-          Claim winnings at {poolCloseDate.toLocaleTimeString()} on{" "}
-          {poolCloseDate.toLocaleDateString()}
-        </Text>
-      );
-    }
-
-    if (pendingPayout === "0") {
-      return <Text color="red.500">No pending payout to claim</Text>; // Add handling for no payouts
-    }
-
     return (
-      <Button
-        my="auto"
-        variant="outline"
-        colorScheme="black"
-        onClick={handleClaimPayout}
-        isLoading={isLoading}
-        loadingText="Claiming..."
-      >
-        Claim winnings ({pendingPayout} ETH)
-      </Button>
+      <Box display="flex" gap="4">
+        <Button
+          variant="outline"
+          colorScheme="blue"
+          onClick={handleSettleBet}
+          isLoading={isLoading}
+          loadingText="Settling..."
+        >
+          Settle Bet
+        </Button>
+        <Button
+          variant="outline"
+          colorScheme="green"
+          onClick={handleClaimPayout}
+          isLoading={isLoading}
+          loadingText="Claiming..."
+        >
+          Claim winnings ({pendingPayout} ETH)
+        </Button>
+      </Box>
     );
   };
 
@@ -219,7 +283,7 @@ const BetCard: React.FC<BetCardProps> = ({ artist, odds, amount, date, country }
           </Box>
         </Tooltip>
       </CardBody>
-      <CardFooter>{renderActionButton()}</CardFooter>
+      <CardFooter>{renderActionButtons()}</CardFooter>
     </Card>
   );
 };

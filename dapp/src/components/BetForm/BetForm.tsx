@@ -357,7 +357,7 @@ const BetForm: React.FC = () => {
 
         <Flex flexDirection={["column", "row"]} alignItems="center" w="100%" mb="4">
           <Input
-            placeholder="Enter an artist name or pick one from the leaderboard"
+            placeholder="Pick an artist from the leaderboard"
             size="md"
             color="black"
             value={selectedArtist?.artist || ""}
